@@ -91,10 +91,6 @@ export {
 } from './detached-install-context';
 export type { DetachedInstallContext, DetachedInstallContextKey } from './detached-install-context';
 
-// Process start identity
-export { readProcessStartIdentity } from './process-start-identity';
-export type { ProcessStartObservation } from './process-start-identity';
-
 // Env loader
 export { loadArchonEnv, isVerboseBoot, getPluginsPath, getArchonEnvNames } from './env-loader';
 
