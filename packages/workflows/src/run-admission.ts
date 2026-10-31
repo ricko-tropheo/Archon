@@ -44,6 +44,18 @@ export interface AdmittedRun {
   checkoutBaselineSample: CheckoutSample | undefined;
 }
 
+/** Stamp this process as the run owner, including a proof-of-incarnation start identity. */
+async function buildExecutionOwner(): Promise<ExecutionOwnerRecord> {
+  const uid = process.getuid?.();
+  const start = await readProcessStartIdentity(process.pid);
+  return {
+    host: hostname(),
+    pid: process.pid,
+    ...(uid === undefined ? {} : { uid }),
+    ...(start.status === 'observed' ? { startIdentity: start.identity } : {}),
+  };
+}
+
 /**
  * Give this process the run it will execute: create the row, or claim and stamp the one a
  * caller supplied, then hold the checkout's path lock. The caller decides whether to
@@ -66,14 +78,7 @@ export async function admitWorkflowRun(
   // This process is the one executing the run, whether it created the row, claimed a
   // row a launcher pre-created, or resumed one. `abandon` shows this record when no
   // owner answers (#2325).
-  const uid = process.getuid?.();
-  const processStart = await readProcessStartIdentity(process.pid);
-  const executionOwner: ExecutionOwnerRecord = {
-    host: hostname(),
-    pid: process.pid,
-    ...(uid === undefined ? {} : { uid }),
-    ...(processStart.status === 'observed' ? { startIdentity: processStart.identity } : {}),
-  };
+  const executionOwner = await buildExecutionOwner();
 
   if (preCreatedRun && priorCompletedNodes !== undefined) {
     await notifyResumingRun(platform, conversationId, workflow.name, priorCompletedNodes);
