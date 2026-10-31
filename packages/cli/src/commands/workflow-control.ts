@@ -43,9 +43,9 @@ export async function workflowResumeCommand(
 ): Promise<number> {
   const { resumeWorkflow: resumeWorkflowOp } = host.operations;
 
-  // --detach: validate read-only (resumeWorkflowOp checks the run is resumable),
-  // then let a detached child re-invoke the blocking resume and own all mutation
-  // + execution, so a reaped launching shell can't wedge the run mid-resume.
+  // --detach: validate (and, for a proven-dead owner, recover) the run, then let
+  // a detached child re-invoke the blocking resume and own all mutation + execution,
+  // so a reaped launching shell can't wedge the run mid-resume.
   // Composes with --json (structured ack; nothing executes here).
   if (detach) {
     const resolvedId = await resolveRunIdArg(host, runId, cwd);
@@ -67,8 +67,9 @@ export async function workflowResumeCommand(
   }
 
   // JSON mode is a non-blocking control-plane ack: validate the run is resumable
-  // and report its state, but do NOT re-execute the workflow inline (execution
-  // streams workflow output to stdout, which would corrupt the JSON contract).
+  // (recovering a proven-dead owner through the supported failure transition) and
+  // report its state, but do NOT re-execute the workflow inline (execution streams
+  // workflow output to stdout, which would corrupt the JSON contract).
   // To actually execute a resumable run, use the blocking `resume` (no --json,
   // run as a background task) or `resume <run-id> --detach`. Prefer that exact-id
   // form over `run <name> --resume --detach`, which selects the newest resumable

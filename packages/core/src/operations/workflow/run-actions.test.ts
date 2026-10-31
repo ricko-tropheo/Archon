@@ -1,8 +1,12 @@
 // @archon-test-isolated
 import { describe, test, expect, beforeEach } from 'bun:test';
+import { hostname } from 'node:os';
+import { EXECUTION_CLAIM_METADATA_KEY } from '@archon/workflows/store';
 import {
   operator,
   mockGetWorkflowRun,
+  mockFailWorkflowRun,
+  mockReadProcessStartIdentity,
   EMPTY_COUNTS,
   mockListWorkflowRuns,
   mockDeleteWorkflowNodeSessions,
@@ -123,5 +127,116 @@ describe('resetWorkflowNodeSessions', () => {
     await expect(resetWorkflowNodeSessions({ workflow_name: 'feature-dev' })).rejects.toThrow(
       'Failed to reset workflow node sessions: connection refused'
     );
+  });
+});
+
+describe('resumeWorkflow stale-owner recovery', () => {
+  const claim = 'claim-1';
+
+  function runningRun(owner: Record<string, unknown>): ReturnType<typeof makePausedRun> {
+    return makePausedRun({
+      status: 'running',
+      metadata: {
+        [EXECUTION_CLAIM_METADATA_KEY]: claim,
+        execution_owner: owner,
+      },
+    });
+  }
+
+  beforeEach(() => {
+    mockGetWorkflowRun.mockReset();
+    mockFailWorkflowRun.mockReset();
+    mockFailWorkflowRun.mockResolvedValue({ failed: true });
+  });
+
+  test('refuses a live owner without touching the run', async () => {
+    const observed = await mockReadProcessStartIdentity(process.pid);
+    if (observed.status !== 'observed') throw new Error('test host cannot observe its own start');
+    mockGetWorkflowRun.mockResolvedValueOnce(
+      runningRun({
+        host: hostname(),
+        pid: process.pid,
+        uid: process.getuid?.(),
+        startIdentity: observed.identity,
+      })
+    );
+    await expect(resumeWorkflow('run-1', operator)).rejects.toThrow(
+      "Cannot resume run with status 'running'"
+    );
+    expect(mockFailWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['a remote host', { host: 'another-host', pid: 4242, startIdentity: 'ps:remote' }],
+    ['another user', { host: hostname(), pid: 4242, uid: 999_999, startIdentity: 'ps:other' }],
+    ['a missing start identity', { host: hostname(), pid: 4242 }],
+    [
+      'a mismatched process start identity',
+      { host: hostname(), pid: process.pid, uid: process.getuid?.(), startIdentity: 'ps:wrong' },
+    ],
+  ])('refuses %s', async (_label, owner) => {
+    mockGetWorkflowRun.mockResolvedValueOnce(runningRun(owner));
+    await expect(resumeWorkflow('run-1', operator)).rejects.toThrow(
+      "Cannot resume run with status 'running'"
+    );
+    expect(mockFailWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  test('recovers a proven-dead owner through the supported failure transition', async () => {
+    mockGetWorkflowRun
+      .mockResolvedValueOnce(
+        runningRun({
+          host: hostname(),
+          pid: 999_999,
+          uid: process.getuid?.(),
+          startIdentity: 'ps:dead',
+        })
+      )
+      .mockResolvedValueOnce(
+        makePausedRun({ status: 'failed', metadata: { error: 'owner gone' } })
+      );
+    const run = await resumeWorkflow('run-1', operator);
+    expect(run.status).toBe('failed');
+    expect(mockFailWorkflowRun).toHaveBeenCalledWith(
+      'run-1',
+      expect.stringContaining('Previous execution owner'),
+      { exitReason: 'not_finalized', expectedExecutionClaim: claim }
+    );
+  });
+
+  test('refuses when the recovery transition loses to a new running owner', async () => {
+    mockGetWorkflowRun
+      .mockResolvedValueOnce(
+        runningRun({
+          host: hostname(),
+          pid: 999_999,
+          uid: process.getuid?.(),
+          startIdentity: 'ps:dead',
+        })
+      )
+      .mockResolvedValueOnce(
+        runningRun({ host: hostname(), pid: 888_888, startIdentity: 'ps:new' })
+      );
+    mockFailWorkflowRun.mockResolvedValueOnce({ failed: false });
+    await expect(resumeWorkflow('run-1', operator)).rejects.toThrow(
+      "Cannot resume run with status 'running'"
+    );
+  });
+
+  test('returns a run another caller already made failed', async () => {
+    mockGetWorkflowRun
+      .mockResolvedValueOnce(
+        runningRun({
+          host: hostname(),
+          pid: 999_999,
+          uid: process.getuid?.(),
+          startIdentity: 'ps:dead',
+        })
+      )
+      .mockResolvedValueOnce(
+        makePausedRun({ status: 'failed', metadata: { error: 'owner gone' } })
+      );
+    mockFailWorkflowRun.mockResolvedValueOnce({ failed: false });
+    await expect(resumeWorkflow('run-1', operator)).resolves.toMatchObject({ status: 'failed' });
   });
 });

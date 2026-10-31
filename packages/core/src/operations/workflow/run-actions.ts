@@ -1,13 +1,16 @@
+import { hostname } from 'node:os';
+import { readProcessStartIdentity } from '@archon/paths/process-start-identity';
 import {
   RESUMABLE_WORKFLOW_STATUSES,
   TERMINAL_WORKFLOW_STATUSES,
   attentionForm,
+  readExecutionOwner,
   readWorkflowWaitContext,
   pausedAttentionWait,
 } from '@archon/workflows/schemas/workflow-run';
 import type { WorkflowRun } from '@archon/workflows/schemas/workflow-run';
 import type { DashboardWorkflowRun } from '@archon/workflows/schemas/workflow-run-listing';
-import type { IWorkflowStore } from '@archon/workflows/store';
+import { executionClaim, type IWorkflowStore } from '@archon/workflows/store';
 import {
   signalWorkflowWaitRequestSchema,
   type SignalWorkflowWaitRequest,
@@ -73,8 +76,32 @@ export async function getWorkflowStatus(
 }
 
 /**
+ * True only when the recorded owner of a running run is on this host and user and
+ * its PID is absent. A live or reused PID, a remote host, another user, or an
+ * unreadable identity all stay refused: the engine must never guess ownership.
+ */
+async function runningOwnerIsProvablyGone(run: WorkflowRun): Promise<boolean> {
+  const owner = readExecutionOwner(run.metadata);
+  if (!owner?.startIdentity) return false;
+  if (owner.host !== hostname()) return false;
+  if (owner.uid !== process.getuid?.()) return false;
+  const observation = await readProcessStartIdentity(owner.pid);
+  return observation.status === 'absent';
+}
+
+const RUNNING_RESUME_REFUSAL =
+  "Cannot resume run with status 'running'. Only failed or paused runs can be resumed.";
+
+/**
  * Validate that a run can be resumed and return it.
  * Does NOT execute the workflow — callers decide whether to run.
+ *
+ * A `running` run is recoverable only when its recorded owner is proven gone on
+ * this host and user. The recovery uses the ordinary supported failure transition
+ * (`failWorkflowRun` with the interrupted execution claim), leaving completed node
+ * results intact so the subsequent resume replays them and reruns only the
+ * interrupted node. Live, remote, other-user, reused-PID, and identity-less owners
+ * keep the existing refusal.
  */
 export async function resumeWorkflow(
   ctx: OperationContext,
@@ -83,6 +110,35 @@ export async function resumeWorkflow(
 ): Promise<WorkflowRun> {
   const run = await ctx.getRunOrThrow(runId, 'operations.workflow_resume_lookup_failed');
   await ctx.assertMayAct(run, actor, 'resume');
+  if (run.status === 'running') {
+    if (!(await runningOwnerIsProvablyGone(run))) {
+      throw new ResumeRefusedError(RUNNING_RESUME_REFUSAL);
+    }
+    const message =
+      `Previous execution owner (host ${readExecutionOwner(run.metadata)?.host ?? 'unknown'}, ` +
+      `pid ${String(readExecutionOwner(run.metadata)?.pid ?? 'unknown')}) is gone. ` +
+      'Archon recovered the interrupted run; resume replays completed nodes and reruns the interrupted node.';
+    try {
+      const recovered = await ctx.store.failWorkflowRun(run.id, message, {
+        exitReason: 'not_finalized',
+        expectedExecutionClaim: executionClaim(run.metadata),
+      });
+      if (recovered.failed) {
+        return await ctx.getRunOrThrow(run.id, 'operations.workflow_resume_recovery_lookup_failed');
+      }
+    } catch (error) {
+      getLog().warn(
+        { err: error as Error, runId: run.id },
+        'operations.workflow_resume_owner_recovery_failed'
+      );
+    }
+    const current = await ctx.getRunOrThrow(
+      run.id,
+      'operations.workflow_resume_recovery_lookup_failed'
+    );
+    if (current.status === 'failed' || current.status === 'paused') return current;
+    throw new ResumeRefusedError(RUNNING_RESUME_REFUSAL);
+  }
   if (!RESUMABLE_WORKFLOW_STATUSES.includes(run.status)) {
     throw new ResumeRefusedError(
       `Cannot resume run with status '${run.status}'. Only failed or paused runs can be resumed.`

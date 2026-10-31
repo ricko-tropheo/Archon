@@ -1,6 +1,7 @@
 import { isWorkflowExecutionInterruption } from './execution-interruption';
 import { executionClaim } from './store';
 import { formatDuration } from '@archon/paths/duration';
+import { readProcessStartIdentity } from '@archon/paths/process-start-identity';
 import { captureWorkflowTerminal, createLogger } from '@archon/paths';
 import { hostname } from 'os';
 import { recordCheckoutSample, sampleCheckout, type CheckoutSample } from './checkout-observation';
@@ -66,10 +67,12 @@ export async function admitWorkflowRun(
   // row a launcher pre-created, or resumed one. `abandon` shows this record when no
   // owner answers (#2325).
   const uid = process.getuid?.();
+  const processStart = await readProcessStartIdentity(process.pid);
   const executionOwner: ExecutionOwnerRecord = {
     host: hostname(),
     pid: process.pid,
     ...(uid === undefined ? {} : { uid }),
+    ...(processStart.status === 'observed' ? { startIdentity: processStart.identity } : {}),
   };
 
   if (preCreatedRun && priorCompletedNodes !== undefined) {

@@ -38,6 +38,9 @@ export const mockListWorkflowRuns = mock<IWorkflowStore['listWorkflowRuns']>(() 
 export const mockCancelWorkflowRun = mock<IWorkflowStore['cancelWorkflowRun']>(() =>
   Promise.resolve({ cancelled: true })
 );
+export const mockFailWorkflowRun = mock<IWorkflowStore['failWorkflowRun']>(() =>
+  Promise.resolve({ failed: false })
+);
 export const mockCancelResumableRunsForConversation = mock<
   IWorkflowStore['cancelResumableRunsForConversation']
 >(() => Promise.resolve([]));
@@ -68,6 +71,23 @@ export function noOwnerAnswers(): Promise<never> {
 }
 export const mockRequestDetachedRunStop =
   mock<typeof import('../../services/run-owner-stop').requestDetachedRunStop>(noOwnerAnswers);
+
+export const mockReadProcessStartIdentity = mock(
+  async (
+    pid: number
+  ): Promise<
+    | { status: 'observed'; identity: string }
+    | { status: 'absent' }
+    | { status: 'unavailable'; code: string | number | null }
+  > => {
+    if (pid === process.pid) return { status: 'observed', identity: 'test-self' };
+    if (pid === 999_999) return { status: 'absent' };
+    return { status: 'observed', identity: `test-${String(pid)}` };
+  }
+);
+mock.module('@archon/paths/process-start-identity', () => ({
+  readProcessStartIdentity: mockReadProcessStartIdentity,
+}));
 
 export const mockLogger = {
   fatal: mock(() => undefined),
@@ -136,6 +156,7 @@ export const store: WorkflowOperationsDeps['store'] = {
   listWorkflowRuns: mockListWorkflowRuns,
   findWorkflowRunsByIdPrefix: async () => [],
   cancelWorkflowRun: mockCancelWorkflowRun,
+  failWorkflowRun: mockFailWorkflowRun,
   cancelResumableRunsForConversation: mockCancelResumableRunsForConversation,
   findChildRuns: mockFindChildRuns,
   getRunAncestry: mockGetRunAncestry,

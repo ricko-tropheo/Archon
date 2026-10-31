@@ -210,6 +210,13 @@ export interface ExecutionOwnerRecord {
   pid: number;
   /** POSIX user id; absent on Windows, where the endpoint is not scoped by uid. */
   uid?: number;
+  /**
+   * Opaque process-start identity captured when this owner took the run (for
+   * example `ps:<lstart>` or `windows:<creation-ticks>`). A pid alone cannot
+   * distinguish a dead owner from a reused pid; this can. Absent on legacy rows
+   * and when the host could not observe it; such rows are not recoverable.
+   */
+  startIdentity?: string;
 }
 
 /** Typed view of the execution-owner stamp; undefined on runs that predate it. */
@@ -218,12 +225,21 @@ export function readExecutionOwner(
 ): ExecutionOwnerRecord | undefined {
   const raw = metadata?.[EXECUTION_OWNER_METADATA_KEY];
   if (typeof raw !== 'object' || raw === null) return undefined;
-  const { host, pid, uid } = raw as { host?: unknown; pid?: unknown; uid?: unknown };
+  const { host, pid, uid, startIdentity } = raw as {
+    host?: unknown;
+    pid?: unknown;
+    uid?: unknown;
+    startIdentity?: unknown;
+  };
   if (typeof host !== 'string' || host.length === 0) return undefined;
   if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return undefined;
-  return typeof uid === 'number' && Number.isInteger(uid) && uid >= 0
-    ? { host, pid, uid }
-    : { host, pid };
+  const owner: ExecutionOwnerRecord =
+    typeof uid === 'number' && Number.isInteger(uid) && uid >= 0
+      ? { host, pid, uid }
+      : { host, pid };
+  return typeof startIdentity === 'string' && startIdentity.length > 0
+    ? { ...owner, startIdentity }
+    : owner;
 }
 
 /** Typed view of the run-lifecycle keys on a run's metadata; undefined when unset. */
