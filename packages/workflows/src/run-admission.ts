@@ -1,7 +1,7 @@
 import { isWorkflowExecutionInterruption } from './execution-interruption';
 import { executionClaim } from './store';
 import { formatDuration } from '@archon/paths/duration';
-import { readProcessStartIdentity } from '@archon/paths/process-start-identity';
+import { readProcessGroupId, readProcessStartIdentity } from '@archon/paths/process-start-identity';
 import { captureWorkflowTerminal, createLogger } from '@archon/paths';
 import { hostname } from 'os';
 import { recordCheckoutSample, sampleCheckout, type CheckoutSample } from './checkout-observation';
@@ -48,11 +48,15 @@ export interface AdmittedRun {
 async function buildExecutionOwner(): Promise<ExecutionOwnerRecord> {
   const uid = process.getuid?.();
   const start = await readProcessStartIdentity(process.pid);
+  const group = await readProcessGroupId(process.pid);
   return {
     host: hostname(),
     pid: process.pid,
     ...(uid === undefined ? {} : { uid }),
     ...(start.status === 'observed' ? { startIdentity: start.identity } : {}),
+    // Only a group leader can prove its node children share a known group. A
+    // foreground owner shares the launcher's group, so it stays unrecoverable.
+    ...(group !== null && group === process.pid ? { processGroupId: group } : {}),
   };
 }
 

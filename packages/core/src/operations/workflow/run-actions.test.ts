@@ -1,11 +1,19 @@
 // @archon-test-isolated
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { hostname } from 'node:os';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { getRunArtifactsDirForRoot } from '@archon/paths';
+import {
+  activeNodeGroupPgidPath,
+  beginActiveNodeGroup,
+} from '@archon/workflows/active-node-groups';
 import { EXECUTION_CLAIM_METADATA_KEY } from '@archon/workflows/store';
 import {
   operator,
   mockGetWorkflowRun,
   mockFailWorkflowRun,
+  mockProcessGroupHasLiveMembers,
   mockReadProcessStartIdentity,
   EMPTY_COUNTS,
   mockListWorkflowRuns,
@@ -143,10 +151,28 @@ describe('resumeWorkflow stale-owner recovery', () => {
     });
   }
 
+  function withActiveNode(
+    run: ReturnType<typeof makePausedRun>,
+    pgid: number | null | 'none'
+  ): ReturnType<typeof makePausedRun> {
+    const root = mkdtempSync(join(tmpdir(), 'archon-active-node-'));
+    if (pgid !== 'none') {
+      const artifacts = getRunArtifactsDirForRoot(root, run.id);
+      mkdirSync(artifacts, { recursive: true });
+      beginActiveNodeGroup(artifacts, 'exec-1', 'node');
+      if (pgid !== null) {
+        writeFileSync(activeNodeGroupPgidPath(artifacts, 'exec-1'), `${String(pgid)}\n`);
+      }
+    }
+    return { ...run, output_root: root };
+  }
+
   beforeEach(() => {
     mockGetWorkflowRun.mockReset();
     mockFailWorkflowRun.mockReset();
     mockFailWorkflowRun.mockResolvedValue({ failed: true });
+    mockProcessGroupHasLiveMembers.mockReset();
+    mockProcessGroupHasLiveMembers.mockResolvedValue(false);
   });
 
   test('refuses a live owner without touching the run', async () => {
@@ -167,17 +193,89 @@ describe('resumeWorkflow stale-owner recovery', () => {
   });
 
   test.each([
-    ['a remote host', { host: 'another-host', pid: 4242, startIdentity: 'ps:remote' }],
-    ['another user', { host: hostname(), pid: 4242, uid: 999_999, startIdentity: 'ps:other' }],
-    ['a missing start identity', { host: hostname(), pid: 4242 }],
+    [
+      'a remote host',
+      { host: 'another-host', pid: 4242, startIdentity: 'ps:remote' },
+      "Cannot resume run with status 'running'",
+    ],
+    [
+      'another user',
+      { host: hostname(), pid: 4242, uid: 999_999, startIdentity: 'ps:other' },
+      "Cannot resume run with status 'running'",
+    ],
+    [
+      'a missing start identity',
+      { host: hostname(), pid: 4242 },
+      'child lifecycle cannot be proven stopped',
+    ],
     [
       'a mismatched process start identity',
       { host: hostname(), pid: process.pid, uid: process.getuid?.(), startIdentity: 'ps:wrong' },
+      "Cannot resume run with status 'running'",
     ],
-  ])('refuses %s', async (_label, owner) => {
+    [
+      'a missing process group identity',
+      { host: hostname(), pid: 999_999, uid: process.getuid?.(), startIdentity: 'ps:dead' },
+      'child lifecycle cannot be proven stopped',
+    ],
+  ])('refuses %s', async (_label, owner, expected) => {
     mockGetWorkflowRun.mockResolvedValueOnce(runningRun(owner));
+    await expect(resumeWorkflow('run-1', operator)).rejects.toThrow(expected);
+    expect(mockFailWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  test('refuses a dead owner when its process group still has a live node child', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(
+      runningRun({
+        host: hostname(),
+        pid: 999_999,
+        uid: process.getuid?.(),
+        startIdentity: 'ps:dead',
+        processGroupId: 4242,
+      })
+    );
+    mockProcessGroupHasLiveMembers.mockResolvedValueOnce(true);
     await expect(resumeWorkflow('run-1', operator)).rejects.toThrow(
-      "Cannot resume run with status 'running'"
+      'process group still has live members'
+    );
+    expect(mockFailWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  test('refuses a dead owner whose recorded node group is still live', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(
+      withActiveNode(
+        runningRun({
+          host: hostname(),
+          pid: 999_999,
+          uid: process.getuid?.(),
+          startIdentity: 'ps:dead',
+          processGroupId: 4242,
+        }),
+        5555
+      )
+    );
+    mockProcessGroupHasLiveMembers.mockImplementation(async pgid => pgid === 5555);
+    await expect(resumeWorkflow('run-1', operator)).rejects.toThrow(
+      'process group still has live members'
+    );
+    expect(mockFailWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  test('refuses a dead owner whose node group identity is unreadable', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(
+      withActiveNode(
+        runningRun({
+          host: hostname(),
+          pid: 999_999,
+          uid: process.getuid?.(),
+          startIdentity: 'ps:dead',
+          processGroupId: 4242,
+        }),
+        null
+      )
+    );
+    await expect(resumeWorkflow('run-1', operator)).rejects.toThrow(
+      'child lifecycle cannot be proven stopped'
     );
     expect(mockFailWorkflowRun).not.toHaveBeenCalled();
   });
@@ -185,12 +283,16 @@ describe('resumeWorkflow stale-owner recovery', () => {
   test('recovers a proven-dead owner through the supported failure transition', async () => {
     mockGetWorkflowRun
       .mockResolvedValueOnce(
-        runningRun({
-          host: hostname(),
-          pid: 999_999,
-          uid: process.getuid?.(),
-          startIdentity: 'ps:dead',
-        })
+        withActiveNode(
+          runningRun({
+            host: hostname(),
+            pid: 999_999,
+            uid: process.getuid?.(),
+            startIdentity: 'ps:dead',
+            processGroupId: 4242,
+          }),
+          'none'
+        )
       )
       .mockResolvedValueOnce(
         makePausedRun({ status: 'failed', metadata: { error: 'owner gone' } })
@@ -207,12 +309,16 @@ describe('resumeWorkflow stale-owner recovery', () => {
   test('refuses when the recovery transition loses to a new running owner', async () => {
     mockGetWorkflowRun
       .mockResolvedValueOnce(
-        runningRun({
-          host: hostname(),
-          pid: 999_999,
-          uid: process.getuid?.(),
-          startIdentity: 'ps:dead',
-        })
+        withActiveNode(
+          runningRun({
+            host: hostname(),
+            pid: 999_999,
+            uid: process.getuid?.(),
+            startIdentity: 'ps:dead',
+            processGroupId: 4242,
+          }),
+          'none'
+        )
       )
       .mockResolvedValueOnce(
         runningRun({ host: hostname(), pid: 888_888, startIdentity: 'ps:new' })
@@ -226,12 +332,16 @@ describe('resumeWorkflow stale-owner recovery', () => {
   test('returns a run another caller already made failed', async () => {
     mockGetWorkflowRun
       .mockResolvedValueOnce(
-        runningRun({
-          host: hostname(),
-          pid: 999_999,
-          uid: process.getuid?.(),
-          startIdentity: 'ps:dead',
-        })
+        withActiveNode(
+          runningRun({
+            host: hostname(),
+            pid: 999_999,
+            uid: process.getuid?.(),
+            startIdentity: 'ps:dead',
+            processGroupId: 4242,
+          }),
+          'none'
+        )
       )
       .mockResolvedValueOnce(
         makePausedRun({ status: 'failed', metadata: { error: 'owner gone' } })

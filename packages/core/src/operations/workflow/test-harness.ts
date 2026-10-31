@@ -87,7 +87,13 @@ export const mockReadProcessStartIdentity = mock(
 );
 mock.module('@archon/paths/process-start-identity', () => ({
   readProcessStartIdentity: mockReadProcessStartIdentity,
+  readProcessGroupId: async (pid: number) => (pid === process.pid ? pid : null),
+  processGroupHasLiveMembers: mockProcessGroupHasLiveMembers,
 }));
+
+export const mockProcessGroupHasLiveMembers = mock(
+  async (_pgid: number): Promise<boolean> => false
+);
 
 export const mockLogger = {
   fatal: mock(() => undefined),
@@ -185,6 +191,7 @@ export const {
   store,
   hostStore: { isolation: isolationStore },
   requestDetachedRunStop: mockRequestDetachedRunStop,
+  processGroupHasLiveMembers: mockProcessGroupHasLiveMembers,
   isRunOwnedByThisProcess,
   isRunOwnerAnswering,
   reclaimRunWorktree: async () => ({ warnings: [] }),

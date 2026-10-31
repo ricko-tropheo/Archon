@@ -65,16 +65,36 @@ nodes:
       ARCHON_HOME: archonHome,
       ARCHON_TELEMETRY_DISABLED: '1',
     };
-    const owner = Bun.spawn(
-      [process.execPath, cliPath, 'workflow', 'run', 'stale-owner', 'go', '--no-worktree'],
-      { cwd: project, env, stdout: 'ignore', stderr: 'ignore' }
+    // --detach makes the owner a process-group leader whose node subprocesses
+    // are recorded without a lifeline; SIGKILL leaves those children alive.
+    const launch = spawnSync(
+      process.execPath,
+      [cliPath, 'workflow', 'run', 'stale-owner', 'go', '--no-worktree', '--detach', '--json'],
+      { cwd: project, env, encoding: 'utf8' }
     );
-    const runId = await waitFor(() => {
-      const path = join(project, 'run-id');
+    expect(launch.status).toBe(0);
+    const runId = (JSON.parse(launch.stdout) as { runId: string }).runId;
+    const ownerPid = await waitFor(() => {
+      const detail = spawnSync(process.execPath, [cliPath, 'workflow', 'get', runId, '--json'], {
+        cwd: project,
+        env,
+        encoding: 'utf8',
+      });
+      const run = JSON.parse(detail.stdout) as {
+        metadata?: { execution_owner?: { pid?: number } };
+      };
+      return run.metadata?.execution_owner?.pid;
+    }, 'the detached owner to stamp its pid');
+    const artifacts = await waitFor(() => {
+      const path = join(project, 'artifacts-dir');
       return existsSync(path) ? readFileSync(path, 'utf8').trim() : undefined;
-    }, 'the held node to publish its run id');
-    const artifacts = readFileSync(join(project, 'artifacts-dir'), 'utf8').trim();
-    const holdPid = Number(readFileSync(join(project, 'hold.pid'), 'utf8').trim());
+    }, 'the held node to publish its artifacts dir');
+    const holdPid = Number(
+      await waitFor(() => {
+        const path = join(project, 'hold.pid');
+        return existsSync(path) ? readFileSync(path, 'utf8').trim() : undefined;
+      }, 'the held node to publish its pid')
+    );
 
     // A live owner cannot be recovered by a second process.
     const liveResume = spawnSync(process.execPath, [cliPath, 'workflow', 'resume', runId], {
@@ -87,14 +107,10 @@ nodes:
       "Cannot resume run with status 'running'"
     );
 
-    process.kill(owner.pid, 'SIGKILL');
-    try {
-      process.kill(holdPid, 'SIGKILL');
-    } catch {
-      // The held node already exited.
-    }
-    await owner.exited;
-    await Bun.sleep(250);
+    process.kill(ownerPid, 'SIGKILL');
+    await Bun.sleep(500);
+    // The detached owner left the node child alive; this is the orphan case.
+    expect(() => process.kill(holdPid, 0)).not.toThrow();
 
     const before = spawnSync(process.execPath, [cliPath, 'workflow', 'get', runId, '--json'], {
       cwd: project,
@@ -102,6 +118,36 @@ nodes:
       encoding: 'utf8',
     });
     expect(JSON.parse(before.stdout).status).toBe('running');
+
+    // The owner is dead but the node child is still alive. Recovery must refuse
+    // rather than start a second execution of the interrupted node.
+    const orphaned = spawnSync(process.execPath, [cliPath, 'workflow', 'resume', runId], {
+      cwd: project,
+      env,
+      encoding: 'utf8',
+    });
+    process.stderr.write(
+      `DEBUG orphaned status=${String(orphaned.status)} stderr=${orphaned.stderr}\n`
+    );
+    expect(orphaned.status).not.toBe(0);
+    expect(`${orphaned.stdout}${orphaned.stderr}`).toContain(
+      'process group still has live members'
+    );
+
+    try {
+      process.kill(holdPid, 'SIGKILL');
+    } catch {
+      // The held node already exited.
+    }
+    await waitFor(() => {
+      try {
+        process.kill(holdPid, 0);
+        return undefined;
+      } catch {
+        return true;
+      }
+    }, 'the orphaned node child to exit');
+    await Bun.sleep(250);
 
     writeFileSync(join(artifacts, 'resume-now'), '');
     const resume = spawnSync(process.execPath, [cliPath, 'workflow', 'resume', runId], {

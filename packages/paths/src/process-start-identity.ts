@@ -66,3 +66,44 @@ export async function readProcessStartIdentity(pid: number): Promise<ProcessStar
     return { status: 'unavailable', code };
   }
 }
+
+/**
+ * Read the POSIX process group id for `pid`, or null on Windows / when it cannot
+ * be observed. A recovery may inspect the group to prove no node child survived
+ * the owner; an unreadable group is treated as unknown, never as gone.
+ */
+export async function readProcessGroupId(pid: number): Promise<number | null> {
+  if (process.platform === 'win32' || !Number.isSafeInteger(pid) || pid <= 0) return null;
+  try {
+    const { stdout } = await execFileAsync('/bin/ps', ['-o', 'pgid=', '-p', String(pid)], {
+      timeout: 5_000,
+    });
+    const value = Number(normalize(stdout));
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when the POSIX process group has a live (non-zombie) member. A failed
+ * inspection returns true: the caller must refuse recovery when it cannot prove
+ * the group is empty.
+ */
+export async function processGroupHasLiveMembers(pgid: number): Promise<boolean> {
+  if (process.platform === 'win32' || !Number.isSafeInteger(pgid) || pgid <= 0) return true;
+  try {
+    const { stdout } = await execFileAsync('/bin/ps', ['-A', '-o', 'pgid=,stat='], {
+      timeout: 5_000,
+    });
+    for (const line of stdout.split('\n')) {
+      if (!line.trim()) continue;
+      const fields = /^\s*(\d+)\s+(\S+)/.exec(line);
+      if (!fields) return true;
+      if (Number(fields[1]) === pgid && !fields[2].startsWith('Z')) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}

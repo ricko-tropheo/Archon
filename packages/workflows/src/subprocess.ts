@@ -10,6 +10,7 @@ import {
   redactCredentialValues,
 } from '@archon/paths/credential-redaction';
 import { logExecOutput } from './logger';
+import { ACTIVE_NODE_GROUP_ENV } from './active-node-groups';
 
 export { retainStreamTail } from './executor-shared';
 
@@ -529,7 +530,16 @@ function spawnOwnedGroup(
   const { node } = options;
   const posix = process.platform !== 'win32';
   const lifeline = posix && !node;
-  const child = spawn(cmd, lifeline ? ['-c', SETUP_LIFELINE, 'archon-setup', cmd, ...args] : args, {
+  const marker = posix ? options.env[ACTIVE_NODE_GROUP_ENV] : undefined;
+  const markerPrologue =
+    'ps -o pgid= -p $$ > "$ARCHON_ACTIVE_NODE_GROUP_FILE" 2>/dev/null || true; exec "$@"';
+  const spawnCommand = marker ? '/bin/sh' : cmd;
+  const spawnArgs = marker
+    ? ['-c', markerPrologue, 'archon-node', cmd, ...args]
+    : lifeline
+      ? ['-c', SETUP_LIFELINE, 'archon-setup', cmd, ...args]
+      : args;
+  const child = spawn(spawnCommand, spawnArgs, {
     cwd: options.cwd,
     env: options.env,
     windowsHide: true,

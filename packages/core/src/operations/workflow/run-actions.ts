@@ -1,4 +1,5 @@
 import { hostname } from 'node:os';
+import { getRunArtifactsDirForRoot } from '@archon/paths';
 import { readProcessStartIdentity } from '@archon/paths/process-start-identity';
 import {
   RESUMABLE_WORKFLOW_STATUSES,
@@ -11,6 +12,7 @@ import {
 import type { WorkflowRun } from '@archon/workflows/schemas/workflow-run';
 import type { DashboardWorkflowRun } from '@archon/workflows/schemas/workflow-run-listing';
 import { executionClaim, type IWorkflowStore } from '@archon/workflows/store';
+import { readActiveNodeGroups } from '@archon/workflows/active-node-groups';
 import {
   signalWorkflowWaitRequestSchema,
   type SignalWorkflowWaitRequest,
@@ -75,22 +77,91 @@ export async function getWorkflowStatus(
   return { runs };
 }
 
+type RunningRecoveryState =
+  | 'recover'
+  | 'refuse_live_owner'
+  | 'refuse_unknown_identity'
+  | 'refuse_live_children';
+
 /**
- * True only when the recorded owner of a running run is on this host and user and
- * its PID is absent. A live or reused PID, a remote host, another user, or an
- * unreadable identity all stay refused: the engine must never guess ownership.
+ * A running run is recoverable only when its owner is on this host/user, its PID
+ * start identity is absent, and the owner's process group has no survivors. A
+ * node child can outlive a SIGKILLed owner; checking the group prevents a resume
+ * from duplicating that node. Live/reused owners, remote/other-user owners, and
+ * any owner whose child lifecycle cannot be proven stopped stay refused.
  */
-async function runningOwnerIsProvablyGone(run: WorkflowRun): Promise<boolean> {
+async function runningOwnerRecoveryState(
+  run: WorkflowRun,
+  groupHasLiveMembers: (pgid: number) => Promise<boolean>
+): Promise<RunningRecoveryState> {
   const owner = readExecutionOwner(run.metadata);
-  if (!owner?.startIdentity) return false;
-  if (owner.host !== hostname()) return false;
-  if (owner.uid !== process.getuid?.()) return false;
+  if (!owner?.startIdentity) return 'refuse_unknown_identity';
+  if (owner.host !== hostname()) return 'refuse_live_owner';
+  if (owner.uid !== process.getuid?.()) return 'refuse_live_owner';
   const observation = await readProcessStartIdentity(owner.pid);
-  return observation.status === 'absent';
+  if (observation.status === 'unavailable') return 'refuse_unknown_identity';
+  if (observation.status === 'observed') return 'refuse_live_owner';
+  if (owner.processGroupId === undefined) return 'refuse_unknown_identity';
+  if (await groupHasLiveMembers(owner.processGroupId)) return 'refuse_live_children';
+
+  // The owner's own group does not contain node subprocesses (Archon runs each
+  // node in its own session). A start marker is written before each spawn; a
+  // missing/invalid pgid or a live marked group means the interrupted node may
+  // still be running, so recovery stays refused.
+  if (!run.output_root) return 'refuse_unknown_identity';
+  const active = readActiveNodeGroups(getRunArtifactsDirForRoot(run.output_root, run.id));
+  for (const group of active) {
+    if (!group.valid || group.pgid === null) return 'refuse_unknown_identity';
+    if (await groupHasLiveMembers(group.pgid)) return 'refuse_live_children';
+  }
+  return 'recover';
 }
 
 const RUNNING_RESUME_REFUSAL =
   "Cannot resume run with status 'running'. Only failed or paused runs can be resumed.";
+
+async function recoverRunningRun(ctx: OperationContext, run: WorkflowRun): Promise<WorkflowRun> {
+  const recovery = await runningOwnerRecoveryState(run, ctx.processGroupHasLiveMembers);
+  if (recovery === 'refuse_live_owner') {
+    throw new ResumeRefusedError(RUNNING_RESUME_REFUSAL);
+  }
+  if (recovery === 'refuse_unknown_identity') {
+    throw new ResumeRefusedError(
+      `Cannot resume running run '${run.id}': its execution owner or child lifecycle cannot be proven stopped.`
+    );
+  }
+  if (recovery === 'refuse_live_children') {
+    throw new ResumeRefusedError(
+      `Cannot resume running run '${run.id}': the recorded owner is gone but its process group still has live members. ` +
+        'Stop the orphaned node process (or abandon the run) before resuming.'
+    );
+  }
+  const owner = readExecutionOwner(run.metadata);
+  const message =
+    `Previous execution owner (host ${owner?.host ?? 'unknown'}, ` +
+    `pid ${String(owner?.pid ?? 'unknown')}) is gone. ` +
+    'Archon recovered the interrupted run; resume replays completed nodes and reruns the interrupted node.';
+  try {
+    const recovered = await ctx.store.failWorkflowRun(run.id, message, {
+      exitReason: 'not_finalized',
+      expectedExecutionClaim: executionClaim(run.metadata),
+    });
+    if (recovered.failed) {
+      return await ctx.getRunOrThrow(run.id, 'operations.workflow_resume_recovery_lookup_failed');
+    }
+  } catch (error) {
+    getLog().warn(
+      { err: error as Error, runId: run.id },
+      'operations.workflow_resume_owner_recovery_failed'
+    );
+  }
+  const current = await ctx.getRunOrThrow(
+    run.id,
+    'operations.workflow_resume_recovery_lookup_failed'
+  );
+  if (current.status === 'failed' || current.status === 'paused') return current;
+  throw new ResumeRefusedError(RUNNING_RESUME_REFUSAL);
+}
 
 /**
  * Validate that a run can be resumed and return it.
@@ -111,33 +182,7 @@ export async function resumeWorkflow(
   const run = await ctx.getRunOrThrow(runId, 'operations.workflow_resume_lookup_failed');
   await ctx.assertMayAct(run, actor, 'resume');
   if (run.status === 'running') {
-    if (!(await runningOwnerIsProvablyGone(run))) {
-      throw new ResumeRefusedError(RUNNING_RESUME_REFUSAL);
-    }
-    const message =
-      `Previous execution owner (host ${readExecutionOwner(run.metadata)?.host ?? 'unknown'}, ` +
-      `pid ${String(readExecutionOwner(run.metadata)?.pid ?? 'unknown')}) is gone. ` +
-      'Archon recovered the interrupted run; resume replays completed nodes and reruns the interrupted node.';
-    try {
-      const recovered = await ctx.store.failWorkflowRun(run.id, message, {
-        exitReason: 'not_finalized',
-        expectedExecutionClaim: executionClaim(run.metadata),
-      });
-      if (recovered.failed) {
-        return await ctx.getRunOrThrow(run.id, 'operations.workflow_resume_recovery_lookup_failed');
-      }
-    } catch (error) {
-      getLog().warn(
-        { err: error as Error, runId: run.id },
-        'operations.workflow_resume_owner_recovery_failed'
-      );
-    }
-    const current = await ctx.getRunOrThrow(
-      run.id,
-      'operations.workflow_resume_recovery_lookup_failed'
-    );
-    if (current.status === 'failed' || current.status === 'paused') return current;
-    throw new ResumeRefusedError(RUNNING_RESUME_REFUSAL);
+    return recoverRunningRun(ctx, run);
   }
   if (!RESUMABLE_WORKFLOW_STATUSES.includes(run.status)) {
     throw new ResumeRefusedError(

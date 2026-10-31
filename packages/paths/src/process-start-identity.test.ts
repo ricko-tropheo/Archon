@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { readProcessStartIdentity } from './process-start-identity';
+import {
+  processGroupHasLiveMembers,
+  readProcessGroupId,
+  readProcessStartIdentity,
+} from './process-start-identity';
 
 describe('readProcessStartIdentity', () => {
   test('observes the current process', async () => {
@@ -24,6 +28,25 @@ describe('readProcessStartIdentity', () => {
       status: 'unavailable',
       code: 'INVALID_PID',
     });
+  });
+
+  test.skipIf(process.platform === 'win32')('observes a live process group', async () => {
+    const group = await readProcessGroupId(process.pid);
+    expect(group).not.toBeNull();
+    expect(group).toBeGreaterThan(0);
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'observes the current process group as live',
+    async () => {
+      const group = await readProcessGroupId(process.pid);
+      if (group === null) throw new Error('no process group');
+      expect(await processGroupHasLiveMembers(group)).toBe(true);
+    }
+  );
+
+  test.skipIf(process.platform === 'win32')('reports an absent group as empty', async () => {
+    expect(await processGroupHasLiveMembers(999_999)).toBe(false);
   });
 
   test('the observed identity is stable across reads', async () => {

@@ -31,6 +31,12 @@ import { nodeTemplateReferences, buildNodeShellEnvironment } from '../../referen
 import { formatPersistedNodeOutput } from '../../node-output';
 import { runSubprocessUntilRunStops } from '../../run-control';
 import {
+  ACTIVE_NODE_GROUP_ENV,
+  activeNodeGroupPgidPath,
+  beginActiveNodeGroup,
+  clearActiveNodeGroup,
+} from '../../../active-node-groups';
+import {
   ExecOutputContractError,
   certifyExecOutput,
   assertExecArtifactPointers,
@@ -62,11 +68,22 @@ export async function executeScriptNode(
   if ('errorMsg' in lookup) return recordScriptConfigFailure(ctx, node, execution, lookup.errorMsg);
   await recheckNamedScriptSource(source, finalScript, stepName);
 
+  const activeExecutionId = execution.attempt.id;
+  beginActiveNodeGroup(ctx.artifactsDir, activeExecutionId, execution.path);
+  if (ctx.execContext.kind === 'host') {
+    subprocessEnv[ACTIVE_NODE_GROUP_ENV] = activeNodeGroupPgidPath(
+      ctx.artifactsDir,
+      activeExecutionId
+    );
+  }
+
   let certified: ReturnType<typeof certifyExecOutput>;
   try {
     certified = await runScript(ctx, node, lookup, subprocessEnv);
   } catch (error) {
     return recordScriptFailure(ctx, node, execution, lookup.command, error);
+  } finally {
+    clearActiveNodeGroup(ctx.artifactsDir, activeExecutionId);
   }
   return recordScriptSuccess(ctx, node, execution, certified, nodeStartTime);
 }

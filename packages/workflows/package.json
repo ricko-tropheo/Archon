@@ -68,7 +68,8 @@
     "./file-store": "./src/file-store/index.ts",
     "./provider-event-reader": "./src/provider-event-reader.ts",
     "./state-document-store": "./src/state-document-store.ts",
-    "./state-document-conformance": "./src/state-document-conformance.ts"
+    "./state-document-conformance": "./src/state-document-conformance.ts",
+    "./active-node-groups": "./src/active-node-groups.ts"
   },
   "scripts": {
     "test": "bun run ../../scripts/package-tests.ts",

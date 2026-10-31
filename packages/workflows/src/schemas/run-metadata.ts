@@ -217,6 +217,13 @@ export interface ExecutionOwnerRecord {
    * and when the host could not observe it; such rows are not recoverable.
    */
   startIdentity?: string;
+  /**
+   * POSIX process group led by the owner, recorded only when the owner is the
+   * group leader. Recovery checks this group for surviving node children before
+   * resuming. Omitted for foreground owners, Windows, and legacy rows; those
+   * rows are not recoverable because child lifecycle is unknown.
+   */
+  processGroupId?: number;
 }
 
 /** Typed view of the execution-owner stamp; undefined on runs that predate it. */
@@ -225,11 +232,12 @@ export function readExecutionOwner(
 ): ExecutionOwnerRecord | undefined {
   const raw = metadata?.[EXECUTION_OWNER_METADATA_KEY];
   if (typeof raw !== 'object' || raw === null) return undefined;
-  const { host, pid, uid, startIdentity } = raw as {
+  const { host, pid, uid, startIdentity, processGroupId } = raw as {
     host?: unknown;
     pid?: unknown;
     uid?: unknown;
     startIdentity?: unknown;
+    processGroupId?: unknown;
   };
   if (typeof host !== 'string' || host.length === 0) return undefined;
   if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return undefined;
@@ -237,9 +245,15 @@ export function readExecutionOwner(
     typeof uid === 'number' && Number.isInteger(uid) && uid >= 0
       ? { host, pid, uid }
       : { host, pid };
-  return typeof startIdentity === 'string' && startIdentity.length > 0
-    ? { ...owner, startIdentity }
-    : owner;
+  const withStart =
+    typeof startIdentity === 'string' && startIdentity.length > 0
+      ? { ...owner, startIdentity }
+      : owner;
+  return typeof processGroupId === 'number' &&
+    Number.isSafeInteger(processGroupId) &&
+    processGroupId > 0
+    ? { ...withStart, processGroupId }
+    : withStart;
 }
 
 /** Typed view of the run-lifecycle keys on a run's metadata; undefined when unset. */

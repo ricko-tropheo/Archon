@@ -20,6 +20,12 @@ import { nodeTemplateReferences, buildNodeShellEnvironment } from '../../referen
 import { formatPersistedNodeOutput } from '../../node-output';
 import { runSubprocessUntilRunStops } from '../../run-control';
 import {
+  ACTIVE_NODE_GROUP_ENV,
+  activeNodeGroupPgidPath,
+  beginActiveNodeGroup,
+  clearActiveNodeGroup,
+} from '../../../active-node-groups';
+import {
   ExecOutputContractError,
   certifyExecOutput,
   assertExecArtifactPointers,
@@ -105,6 +111,11 @@ export async function executeBashNode(
   });
 
   const bashPath = resolveBashPath();
+  const activeExecutionId = execution.attempt.id;
+  beginActiveNodeGroup(artifactsDir, activeExecutionId, execution.path);
+  if (execContext.kind === 'host') {
+    subprocessEnv[ACTIVE_NODE_GROUP_ENV] = activeNodeGroupPgidPath(artifactsDir, activeExecutionId);
+  }
   let certified: ReturnType<typeof certifyExecOutput>;
   try {
     const invocation = bashInvocation(finalScript);
@@ -153,6 +164,8 @@ export async function executeBashNode(
     await assertExecArtifactPointers(workflowRun, node, certified.structuredOutput);
   } catch (error) {
     return recordBashFailure(ctx, node, execution, bashPath, error);
+  } finally {
+    clearActiveNodeGroup(artifactsDir, activeExecutionId);
   }
 
   const output = certified.output;

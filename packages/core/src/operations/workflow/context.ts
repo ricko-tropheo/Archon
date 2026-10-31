@@ -1,4 +1,5 @@
 import { createLogger } from '@archon/paths';
+import { processGroupHasLiveMembers as realProcessGroupHasLiveMembers } from '@archon/paths/process-start-identity';
 import type { WorkflowRun } from '@archon/workflows/schemas/workflow-run';
 import type { IWorkflowStore } from '@archon/workflows/store';
 import type { IIsolationStore } from '@archon/isolation';
@@ -51,10 +52,13 @@ export interface WorkflowOperationsDeps {
   isRunOwnerAnswering: typeof isRunOwnerAnswering;
   reclaimContainerEnv: (envId: string, store: IIsolationStore) => Promise<void>;
   reclaimRunWorktree: typeof ReclaimRunWorktree;
+  /** Test seam for proving a dead owner's process group has no survivors. */
+  processGroupHasLiveMembers?: (pgid: number) => Promise<boolean>;
 }
 
 /** The supplied effects plus the lookup and authorization every operation starts with. */
 export interface OperationContext extends WorkflowOperationsDeps {
+  processGroupHasLiveMembers: (pgid: number) => Promise<boolean>;
   assertAuthorized: (
     run: WorkflowRun,
     actor: RunActor,
@@ -100,5 +104,11 @@ export function createOperationContext(deps: WorkflowOperationsDeps): OperationC
     return run;
   }
 
-  return { ...deps, assertAuthorized, assertMayAct, getRunOrThrow };
+  return {
+    ...deps,
+    processGroupHasLiveMembers: deps.processGroupHasLiveMembers ?? realProcessGroupHasLiveMembers,
+    assertAuthorized,
+    assertMayAct,
+    getRunOrThrow,
+  };
 }
