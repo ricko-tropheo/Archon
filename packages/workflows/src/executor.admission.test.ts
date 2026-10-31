@@ -483,6 +483,7 @@ describe('run row stamps', () => {
         host: hostname(),
         pid: process.pid,
         ...(uid === undefined ? {} : { uid }),
+        startIdentity: expect.any(String),
       },
     };
 
