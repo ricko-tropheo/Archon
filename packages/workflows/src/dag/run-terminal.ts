@@ -341,6 +341,9 @@ async function completeRun(
     runId: workflowRun.id,
     workflowName: workflow.name,
     duration,
+    ...(terminal.output !== undefined && terminal.output.trim().length > 0
+      ? { output: terminal.output }
+      : {}),
   });
   emitter.unregisterRun(workflowRun.id);
 

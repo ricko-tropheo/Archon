@@ -9,6 +9,7 @@ import { terminalWorkflowRunStatusSchema } from '@archon/workflows/schemas/workf
 import { closeDatabase, getDatabase, resetDatabase } from '@archon/core/db/connection';
 import { createWorkflowRun, pauseWorkflowRun } from '@archon/core/db/workflows';
 import { getWorkflowEventEmitter } from '@archon/workflows/event-emitter';
+import type { IWorkflowPlatform } from '@archon/workflows/deps';
 import { ChatSupervisor } from './supervisor';
 import { ChatPluginPlatform } from './platform';
 import { subscribeChatRunEvents, projectRunEvent } from './run-events';
@@ -365,3 +366,67 @@ test.each(['matching', 'stale-pause', 'stale-node', 'missing-platform'] as const
     }
   }
 );
+
+test('a terminal run posts its output and actionable failure commands to the conversation', async () => {
+  const sent: string[] = [];
+  const delivered: ChatRunEvent[] = [];
+  const supervisor = new ChatSupervisor(
+    { descriptor, argv: [process.execPath] },
+    () => {},
+    () => {}
+  );
+  supervisor.runEvent = async event => {
+    delivered.push(event);
+  };
+  const platform = {
+    sendMessage: async (_conversationId: string, text: string) => {
+      sent.push(text);
+    },
+    formatWorkflowCommand: (command: string) => `/archon-workflow ${command}`,
+  };
+  const unsubscribe = subscribeChatRunEvents(
+    new Map([['fixture-chat', supervisor]]),
+    new Map([['fixture-chat', platform as unknown as IWorkflowPlatform]])
+  );
+  try {
+    const run = await createRun('fixture-chat');
+    await getDatabase().query(
+      `UPDATE remote_agent_workflow_runs
+       SET metadata = $1
+       WHERE id = $2`,
+      [JSON.stringify({ total_cost_usd: 0.25, total_tokens_in: 120, total_tokens_out: 30 }), run.id]
+    );
+    getWorkflowEventEmitter().emit({
+      type: 'workflow_completed',
+      runId: run.id,
+      workflowName: run.workflow_name,
+      duration: 12_000,
+      output: '# Final brief\n\nVerdict: approve',
+    });
+    const deadline = Date.now() + DEFAULT_TEST_TIMEOUT_MS;
+    while (sent.length < 1) {
+      if (Date.now() > deadline) throw new Error('Final message was not sent');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    expect(delivered.at(-1)).toMatchObject({ type: 'terminal', status: 'completed' });
+    expect(sent[0]).toContain('# Final brief');
+    expect(sent[0]).toContain('150 tokens');
+    expect(sent[0]).toContain('cost $0.2500');
+
+    getWorkflowEventEmitter().emit({
+      type: 'workflow_failed',
+      runId: run.id,
+      workflowName: run.workflow_name,
+      error: 'node review failed',
+    });
+    while (sent.length < 2) {
+      if (Date.now() > deadline) throw new Error('Failure message was not sent');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    expect(sent[1]).toContain('node review failed');
+    expect(sent[1]).toContain(`Resume: \`/archon-workflow resume ${run.id}\``);
+    expect(sent[1]).toContain(`Stop: \`/archon-workflow abandon ${run.id}\``);
+  } finally {
+    unsubscribe();
+  }
+});

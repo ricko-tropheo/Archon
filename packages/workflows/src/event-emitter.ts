@@ -40,6 +40,12 @@ interface WorkflowCompletedEvent {
   runId: string;
   workflowName: string;
   duration: number;
+  /**
+   * The run's terminal output (its `returns:` node, or the selected sink).
+   * Chat hosts deliver it after the status update so a completed run's result
+   * is reachable from the conversation that started it (#Slack POC).
+   */
+  output?: string;
 }
 
 interface WorkflowFailedEvent {

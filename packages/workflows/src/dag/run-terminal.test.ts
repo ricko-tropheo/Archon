@@ -1166,3 +1166,36 @@ describe('executeDagWorkflow -- completed run worktree release', () => {
     expect(store.completeWorkflowRun.mock.calls[0]?.[2]).not.toHaveProperty('worktree_disposition');
   });
 });
+
+describe('workflow_completed output', () => {
+  it('carries the declared returns node output for chat delivery', async () => {
+    const emitted: WorkflowEmitterEvent[] = [];
+    const unsubscribe = getWorkflowEventEmitter().subscribe(event => emitted.push(event));
+    const testDir = join(
+      tmpdir(),
+      `dag-returns-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    try {
+      await mkdir(testDir, { recursive: true });
+      await executeDagWorkflow(
+        dagOptions({
+          deps: createMockDeps(createMockStore()),
+          conversationId: 'conv-returns',
+          cwd: testDir,
+          workflow: {
+            name: 'returns-test',
+            returns: 'work',
+            nodes: [{ id: 'work', kind: 'exec', runtime: 'sh', script: 'printf "the result"' }],
+          },
+          workflowRun: makeWorkflowRun('dag-returns-run'),
+        })
+      );
+      expect(emitted.find(event => event.type === 'workflow_completed')).toMatchObject({
+        output: 'the result',
+      });
+    } finally {
+      unsubscribe();
+      await removeTempTree(testDir);
+    }
+  });
+});

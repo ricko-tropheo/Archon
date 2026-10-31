@@ -1,8 +1,9 @@
 import { ChildRunRedirectError } from '@archon/core/operations/workflow-operations';
 import { isApprovalContext } from '@archon/workflows/schemas/workflow-run';
-import type { WorkflowCommandSurface } from '@archon/workflows/deps';
+import type { IWorkflowPlatform, WorkflowCommandSurface } from '@archon/workflows/deps';
 import { getApprovalDecisions } from '@archon/workflows/schemas/dag-node';
 import type { ChatRunEvent } from '@archon/chat-contract';
+import { parseRunUsage } from '@archon/workflows/schemas/run-usage';
 import {
   getWorkflowEventEmitter,
   type WorkflowEmitterEvent,
@@ -12,6 +13,7 @@ import * as workflowDb from '@archon/core/db/workflows';
 import * as conversationDb from '@archon/core/db/conversations';
 import { createLogger } from '@archon/paths';
 import type { ChatSupervisor } from './supervisor';
+import { formatFinalMessage } from './final-message';
 
 type WorkflowStarted = Extract<ChatRunEvent, { type: 'workflow_started' }>;
 /** A chat run event before routing supplies the platform conversation id. */
@@ -137,7 +139,7 @@ function applyRunDetails(
 
 export function subscribeChatRunEvents(
   plugins: ReadonlyMap<string, ChatSupervisor>,
-  platforms: ReadonlyMap<string, WorkflowCommandSurface>
+  platforms: ReadonlyMap<string, IWorkflowPlatform>
 ): () => void {
   const log = createLogger('server.chat-events');
   const emitter = getWorkflowEventEmitter();
@@ -171,7 +173,37 @@ export function subscribeChatRunEvents(
         applyRunDetails(run, routed, platform, platforms);
         const delivery = (deliveries.get(platform) ?? Promise.resolve())
           .then(async () => {
-            if (!stopped) await plugin.runEvent(routed);
+            if (stopped) return;
+            await plugin.runEvent(routed);
+            if (routed.type !== 'terminal') return;
+            const surface = platforms.get(platform);
+            if (surface === undefined) return;
+            const usage = parseRunUsage(run.metadata);
+            const duration =
+              event.type === 'workflow_completed'
+                ? event.duration
+                : run.completed_at !== null
+                  ? run.completed_at.getTime() - run.started_at.getTime()
+                  : Date.now() - run.started_at.getTime();
+            const message = formatFinalMessage({
+              workflowName: run.workflow_name,
+              runId: run.id,
+              status: routed.status,
+              ...(event.type === 'workflow_completed' && event.output !== undefined
+                ? { output: event.output }
+                : {}),
+              ...(event.type === 'workflow_failed' ? { error: event.error } : {}),
+              ...(event.type === 'workflow_cancelled' ? { error: event.reason } : {}),
+              durationMs: duration,
+              ...(runTotalCostUsd(run) !== undefined ? { costUsd: runTotalCostUsd(run) } : {}),
+              ...(usage.tokens !== undefined ? { tokens: usage.tokens } : {}),
+              ...(surface.formatWorkflowCommand !== undefined
+                ? { commandPrefix: surface.formatWorkflowCommand('') }
+                : {}),
+            });
+            if (message !== undefined) {
+              await surface.sendMessage(conversation.platform_conversation_id, message);
+            }
           })
           .catch(fail);
         deliveries.set(platform, delivery);
