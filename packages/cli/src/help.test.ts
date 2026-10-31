@@ -72,7 +72,7 @@ describe('CLI help output', () => {
 
   it('lists the workflow resume command', () => {
     expect(help).toContain(
-      'workflow resume <run-id>   Resume a failed or paused run from completed nodes'
+      'workflow resume <run-id>   Resume a failed, paused, or proven-dead-owner run from completed nodes'
     );
   });
 
@@ -232,7 +232,7 @@ Commands:
                              (defaults to the current project)
   workflow attention label <run-id> --occurrence <id>
                              Set or remove labels on the attention wait a run is paused at
-  workflow resume <run-id>   Resume a failed or paused run from completed nodes
+  workflow resume <run-id>   Resume a failed, paused, or proven-dead-owner run from completed nodes
   workflow wake [--watch] [--json] Wake due continuations across this install
   workflow signal <full-run-id> Signal and wake an event wait; use --occurrence for an exact match
   workflow cancel <run-id>   Stop a running workflow (stops an owning process first)
