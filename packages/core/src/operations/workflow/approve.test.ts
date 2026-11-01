@@ -60,6 +60,7 @@ describe('approveWorkflow', () => {
           resolved: 'approved',
           answeredVia: 'cli',
           answeredAt: expect.any(String),
+          answeredBy: { kind: 'operator' },
         },
         approval_response: 'approved',
         rejection_reason: '',
@@ -76,6 +77,7 @@ describe('approveWorkflow', () => {
           step_name: 'review',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'approved',
             comment: 'Looks good',
@@ -280,6 +282,7 @@ describe('approveWorkflow', () => {
           resolved: 'approved',
           answeredVia: 'cli',
           answeredAt: expect.any(String),
+          answeredBy: { kind: 'operator' },
         },
         loop_user_input: 'fix the tests',
         // Real feedback ⇒ the resumed loop iterates (#2074)
@@ -291,6 +294,7 @@ describe('approveWorkflow', () => {
           step_name: 'iterate',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'approved',
             comment: 'fix the tests',
@@ -332,6 +336,7 @@ describe('approveWorkflow', () => {
           resolved: 'approved',
           answeredVia: 'cli',
           answeredAt: expect.any(String),
+          answeredBy: { kind: 'operator' },
         },
         // The recorded comment still defaults to 'Approved' (events/$LOOP_USER_INPUT
         // for non-signaled iterate paths) — only the boolean sees the raw undefined.
@@ -344,6 +349,7 @@ describe('approveWorkflow', () => {
           step_name: 'iterate',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'approved',
             comment: 'Approved',
@@ -533,6 +539,7 @@ describe('approveWorkflow', () => {
           resolved: 'approved',
           answeredVia: 'cli',
           answeredAt: expect.any(String),
+          answeredBy: { kind: 'operator' },
         },
         approval_response: 'approved',
       },
@@ -542,6 +549,7 @@ describe('approveWorkflow', () => {
           step_name: '__writeback__',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'approved',
             comment: 'Approved',

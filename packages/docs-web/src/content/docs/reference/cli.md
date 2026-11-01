@@ -621,12 +621,15 @@ labels, with an exact `archon workflow respond <run-id> <decision> [text]` comma
 for each choice. JSON exposes these choices in `metadata.approval.decisions`.
 
 Once answered, `metadata.approval` also records the surface the answer came through as
-`answeredVia` (`cli`, `api`, `manage_run`, or a chat platform id such as `slack`) and the
-time as `answeredAt`. The `approval_received` event carries the same surface as `via`, and
-the `occurrence` it answered.
-A reject that cancels the run leaves no resumable gate context, so on that path the
-`approval_received` event (with its `via`, `occurrence` and timestamp) is the record.
-These are audit facts. They never name who answered, and nothing routes on them.
+`answeredVia` (`cli`, `api`, `manage_run`, or a chat platform id such as `slack`), the
+time as `answeredAt`, and the resolved actor Archon authorized as `answeredBy`
+(`{ kind: "operator" }`, `{ kind: "user", userId }`, or `{ kind: "unidentified" }`). The
+`approval_received` event carries the same surface as `via`, the `occurrence` it answered,
+and the same `answeredBy`. `answeredBy` is additive and optional: events and gates written
+by older builds remain readable without it. A reject that cancels the run leaves the gate
+context unresolved (no `resolved`, `answeredBy`, or `answeredAt`), so on that path the
+`approval_received` event is the record.
+These are audit facts; nothing routes workflow behavior on them.
 
 `workflow status`, `workflow runs`, and `workflow get` report two independent facts:
 
@@ -1106,8 +1109,9 @@ number of options, or an option on a `message` wait is refused and the run stays
 The next node reads the answer as `$<wait-id>.output`: `{ text }`, `{ decision, text }`, or
 `{ decisions, text }`. In the `approval` form `reject` never cancels the run.
 
-The answer records `answeredVia` and `answeredAt` on the run's `metadata.wait`, and a
-`wait_answered` event carries the surface as `via` and the `occurrence`. Like `approve`,
+The answer records `answeredVia`, `answeredAt`, and the authorized `answeredBy` actor on
+the run's `metadata.wait`, and a `wait_answered` event carries the surface as `via`, the
+`occurrence`, and the same `answeredBy`. Like `approve`,
 human mode continues the run inline, and `--json` records the answer and returns
 `{ ok, runId, action: "answer", answer, workflowName, resumable }` without continuing
 it; `archon serve` or [`workflow wake`](#workflow-wake) continues it. The HTTP equivalent

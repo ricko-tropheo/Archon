@@ -13,6 +13,7 @@ import {
   type AttentionLabels,
   type AttentionOption,
 } from './wait-node';
+import { answeredBySchema } from './answered-by';
 import { recordSurfaceSchema } from './record-surface';
 import { readSourceRelease } from './run-metadata';
 import type { WorkflowRun } from './workflow-run';
@@ -78,6 +79,7 @@ const workflowWaitAttentionFields = {
   answer: attentionAnswerSchema.optional(),
   answeredVia: recordSurfaceSchema.optional(),
   answeredAt: z.string().datetime().optional(),
+  answeredBy: answeredBySchema.optional(),
   labels: attentionLabelsSchema.optional(),
   revision: z.number().int().positive().optional(),
   loopQuestionReferences: z.record(z.string(), z.string()).optional(),

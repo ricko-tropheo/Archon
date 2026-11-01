@@ -1127,6 +1127,7 @@ describe('paused approval gate routing', () => {
           resolved: 'approved',
           answeredVia: 'manage_run',
           answeredAt: expect.any(String),
+          answeredBy: { kind: 'operator' },
         },
         approval_response: 'approved',
         rejection_reason: '',

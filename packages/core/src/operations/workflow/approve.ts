@@ -189,7 +189,7 @@ export async function approveWorkflow(
       // `approval_response`, which is kept only for backward-compat/telemetry (H1). NO
       // node_completed event — there is no DAG node behind this gate (`nodeId` is synthetic).
       metadataPayload = {
-        approval: answeredGate(approval, 'approved', origin),
+        approval: answeredGate(approval, 'approved', origin, actor),
         approval_response: 'approved',
       };
       events = [
@@ -200,6 +200,7 @@ export async function approveWorkflow(
             via: origin.via,
             ...answerOccurrence(approval),
             decision: 'approved',
+            answeredBy: actor,
             comment: approvalComment,
             gate: 'writeback',
           },
@@ -221,7 +222,7 @@ export async function approveWorkflow(
         loop_feedback_given: feedbackProvided,
       };
       metadataPayload = {
-        approval: answeredGate(approval, 'approved', origin),
+        approval: answeredGate(approval, 'approved', origin, actor),
         ...gateRunMetadata,
       };
       // Interactive loop gate — user input already stored in metadata for the next
@@ -238,6 +239,7 @@ export async function approveWorkflow(
             via: origin.via,
             ...answerOccurrence(approval),
             decision: 'approved',
+            answeredBy: actor,
             comment: approvalComment,
             iteration: approval.iteration,
           },
@@ -248,7 +250,7 @@ export async function approveWorkflow(
     case 'approval':
     case undefined: {
       metadataPayload = {
-        approval: answeredGate(approval, 'approved', origin),
+        approval: answeredGate(approval, 'approved', origin, actor),
         approval_response: 'approved',
         rejection_reason: '',
         rejection_count: 0,
@@ -281,6 +283,7 @@ export async function approveWorkflow(
             via: origin.via,
             ...answerOccurrence(approval),
             decision: 'approved',
+            answeredBy: actor,
             comment: approvalComment,
           },
         },

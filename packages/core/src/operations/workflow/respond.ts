@@ -101,13 +101,14 @@ async function respondToWorkflowWithDeclaredDecision(
         via: origin.via,
         ...answerOccurrence(approval),
         decision,
+        answeredBy: actor,
         comment: text ?? decision,
       },
     },
   ];
   const { resolved: won } = await ctx.store.resolveApprovalGate(
     runId,
-    { approval: answeredGate(approval, 'approved', origin), approval_response: decision },
+    { approval: answeredGate(approval, 'approved', origin, actor), approval_response: decision },
     events,
     origin.expectedGate
   );

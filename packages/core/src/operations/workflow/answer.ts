@@ -125,6 +125,7 @@ export async function answerRun(
     answer,
     answeredVia: origin.via,
     answeredAt: new Date().toISOString(),
+    answeredBy: actor,
   });
   if (!answered) {
     throw await lostGateError(ctx, run.id, {

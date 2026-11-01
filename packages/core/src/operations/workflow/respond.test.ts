@@ -170,7 +170,7 @@ describe('respondToWorkflow', () => {
     });
 
   test.each(['approve', 'reject', 'revise'])(
-    'a %s answer records the surface it came through and when, never who answered',
+    'a %s answer records the surface, time, and authorized actor',
     async decision => {
       mockGetWorkflowRun.mockResolvedValue(declaredGate('pause-one'));
       await respondToWorkflow(
@@ -182,13 +182,16 @@ describe('respondToWorkflow', () => {
       );
       const [, metadata, events] = mockResolveApprovalGate.mock.calls[0] ?? [];
       const approval = (metadata as { approval: Record<string, unknown> }).approval;
-      expect(approval).toMatchObject({ answeredVia: 'slack' });
+      expect(approval).toMatchObject({
+        answeredVia: 'slack',
+        answeredBy: { kind: 'user', userId: 'user-who-answered' },
+      });
       expect(Date.parse(String(approval.answeredAt))).not.toBeNaN();
       expect(events?.find(e => e.event_type === 'approval_received')?.data).toMatchObject({
         via: 'slack',
         occurrence: 'pause-one',
+        answeredBy: { kind: 'user', userId: 'user-who-answered' },
       });
-      expect(JSON.stringify([metadata, events])).not.toContain('user-who-answered');
     }
   );
 

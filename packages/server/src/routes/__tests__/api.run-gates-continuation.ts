@@ -480,6 +480,7 @@ export function registerContinuationTests() {
             step_name: 'review-gate',
             data: {
               via: 'api',
+              answeredBy: { kind: 'operator' },
               occurrence: expect.any(String),
               decision: 'rejected',
               reason: 'no',

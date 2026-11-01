@@ -166,6 +166,7 @@ export function registerAnswerTests() {
         answer: { decision: 'choice-1', text: '' },
         answeredVia: 'api',
         answeredAt: expect.any(String),
+        answeredBy: { kind: 'operator' },
       });
       expect(children[0]).toEqual(firstBefore);
     });

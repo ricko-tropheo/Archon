@@ -188,7 +188,7 @@ export async function rejectWorkflow(
   await ctx.assertMayAct(run, actor, 'reject');
   assertAnswerAdmissible(run, origin);
   const approval = assertRejectable(run);
-  if (approval === undefined) return rejectGate(ctx, run, undefined, reason, origin);
+  if (approval === undefined) return rejectGate(ctx, run, undefined, reason, origin, actor);
 
   // Exhaustively switched on the suspend reason (#2489) so a future reason value
   // fails loudly here instead of silently taking the generic rework/cancel path.
@@ -198,7 +198,7 @@ export async function rejectWorkflow(
   // for a defined approval with no `type`.
   switch (approval.type) {
     case 'writeback':
-      return rejectWriteBack(ctx, run, approval, origin);
+      return rejectWriteBack(ctx, run, approval, origin, actor);
     case 'child_workflow':
     case 'fan_out':
       // Unreachable: assertRejectable already redirects a child_workflow or fan_out
@@ -211,7 +211,7 @@ export async function rejectWorkflow(
     case 'approval':
     case 'interactive_loop':
     case undefined:
-      return rejectGate(ctx, run, approval, reason, origin);
+      return rejectGate(ctx, run, approval, reason, origin, actor);
     default: {
       const unreachable: never = approval.type;
       throw new Error(`rejectWorkflow: unhandled gate type '${String(unreachable)}'`);
@@ -229,7 +229,8 @@ async function rejectWriteBack(
   ctx: OperationContext,
   run: WorkflowRun,
   approval: ApprovalContext,
-  origin: GateAnswerOrigin
+  origin: GateAnswerOrigin,
+  actor: RunActor
 ): Promise<RejectionOperationResult> {
   const rejectionEvent: GateResolutionEvent = {
     event_type: 'approval_received',
@@ -238,12 +239,13 @@ async function rejectWriteBack(
       via: origin.via,
       ...answerOccurrence(approval),
       decision: 'rejected',
+      answeredBy: actor,
       gate: 'writeback',
     },
   };
   const { resolved: won } = await ctx.store.resolveApprovalGate(
     run.id,
-    { approval: answeredGate(approval, 'rejected', origin), approval_response: 'rejected' },
+    { approval: answeredGate(approval, 'rejected', origin, actor), approval_response: 'rejected' },
     [rejectionEvent],
     origin.expectedGate
   );
@@ -320,7 +322,8 @@ async function rejectGate(
   run: WorkflowRun,
   approval: ApprovalContext | undefined,
   reason: string | undefined,
-  origin: GateAnswerOrigin
+  origin: GateAnswerOrigin,
+  actor: RunActor
 ): Promise<RejectionOperationResult> {
   const plan = rejectionPlan(run, approval, reason);
 
@@ -333,6 +336,7 @@ async function rejectGate(
       via: origin.via,
       ...answerOccurrence(approval),
       decision: 'rejected',
+      answeredBy: actor,
       reason: plan.rejectReason,
     },
   };
@@ -342,7 +346,8 @@ async function rejectGate(
     approval,
     plan,
     rejectionEvent,
-    origin
+    origin,
+    actor
   );
 
   await publishGateExecution(
@@ -399,7 +404,8 @@ async function commitRejection(
   approval: ApprovalContext | undefined,
   plan: RejectionPlan,
   rejectionEvent: GateResolutionEvent,
-  origin: GateAnswerOrigin
+  origin: GateAnswerOrigin,
+  actor: RunActor
 ): Promise<GateResolutionEvent | undefined> {
   let won: boolean;
   let completedGateEvent: GateResolutionEvent | undefined;
@@ -414,7 +420,7 @@ async function commitRejection(
     );
     ({ resolved: won } = await ctx.store.resolveApprovalGate(
       runId,
-      { approval: answeredGate(approval, 'rejected', origin) },
+      { approval: answeredGate(approval, 'rejected', origin, actor) },
       [completedGateEvent, rejectionEvent],
       origin.expectedGate
     ));
@@ -422,7 +428,7 @@ async function commitRejection(
     ({ resolved: won } = await ctx.store.resolveApprovalGate(
       runId,
       {
-        approval: answeredGate(approval, 'rejected', origin),
+        approval: answeredGate(approval, 'rejected', origin, actor),
         rejection_reason: plan.rejectReason,
         rejection_count: plan.currentCount + 1,
       },

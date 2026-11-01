@@ -69,6 +69,7 @@ describe('CommandHandler', () => {
               resolved: 'approved',
               answeredVia: 'telegram',
               answeredAt: expect.any(String),
+              answeredBy: { kind: 'operator' },
             },
             loop_user_input: 'Add error handling',
             // A real comment counts as feedback ⇒ the resumed loop iterates (#2074)
@@ -80,6 +81,7 @@ describe('CommandHandler', () => {
               step_name: 'refine',
               data: {
                 via: 'telegram',
+                answeredBy: { kind: 'operator' },
                 occurrence: expect.any(String),
                 decision: 'approved',
                 comment: 'Add error handling',
@@ -515,6 +517,7 @@ describe('CommandHandler', () => {
               resolved: 'rejected',
               answeredVia: 'telegram',
               answeredAt: expect.any(String),
+              answeredBy: { kind: 'operator' },
             },
             rejection_reason: 'needs work',
             rejection_count: 1,
@@ -525,6 +528,7 @@ describe('CommandHandler', () => {
               step_name: 'review',
               data: {
                 via: 'telegram',
+                answeredBy: { kind: 'operator' },
                 occurrence: expect.any(String),
                 decision: 'rejected',
                 reason: 'needs work',
@@ -577,6 +581,7 @@ describe('CommandHandler', () => {
               step_name: 'review',
               data: {
                 via: 'telegram',
+                answeredBy: { kind: 'operator' },
                 occurrence: expect.any(String),
                 decision: 'rejected',
                 reason: 'bad',
@@ -627,6 +632,7 @@ describe('CommandHandler', () => {
               step_name: 'gate',
               data: {
                 via: 'telegram',
+                answeredBy: { kind: 'operator' },
                 occurrence: expect.any(String),
                 decision: 'rejected',
                 reason: 'reason',

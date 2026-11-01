@@ -439,6 +439,7 @@ export function registerRejectTests() {
             step_name: 'review-gate',
             data: {
               via: 'api',
+              answeredBy: { kind: 'operator' },
               occurrence: expect.any(String),
               decision: 'rejected',
               reason: 'needs work',
@@ -516,6 +517,7 @@ export function registerRejectTests() {
             resolved: 'rejected',
             answeredVia: 'api',
             answeredAt: expect.any(String),
+            answeredBy: { kind: 'operator' },
           },
           rejection_reason: 'needs more tests',
           rejection_count: 1,
@@ -526,6 +528,7 @@ export function registerRejectTests() {
             step_name: 'review-gate',
             data: {
               via: 'api',
+              answeredBy: { kind: 'operator' },
               occurrence: expect.any(String),
               decision: 'rejected',
               reason: 'needs more tests',
@@ -572,6 +575,7 @@ export function registerRejectTests() {
             step_name: 'review-gate',
             data: {
               via: 'api',
+              answeredBy: { kind: 'operator' },
               occurrence: expect.any(String),
               decision: 'rejected',
               reason: 'still bad',

@@ -1,3 +1,4 @@
+import type { AnsweredBy } from '../schemas/answered-by';
 import type { AttentionLabels } from '../schemas/wait-node';
 import type { RecordSurface } from '../schemas/record-surface';
 import {
@@ -22,14 +23,23 @@ export function waitAnsweredEvent(
     workflow_run_id: workflowRunId,
     event_type: 'wait_answered',
     step_name: workflowWaitStepName(wait),
-    data: { via: wait.answeredVia, occurrence: wait.pauseId, answer: wait.answer },
+    data: {
+      via: wait.answeredVia,
+      occurrence: wait.pauseId,
+      answer: wait.answer,
+      ...(wait.answeredBy !== undefined ? { answeredBy: wait.answeredBy } : {}),
+    },
   };
 }
 
-/** One answer to an open attention wait, checked against the occurrence it names. */
+/**
+ * One answer to an open attention wait, checked against the occurrence it names.
+ * `answeredBy` is additive and optional: answers recorded by builds before it existed
+ * stay valid, and a reader never has to invent an actor.
+ */
 export type AttentionAnswerWrite = Required<
   Pick<WorkflowAttentionWaitContext, 'pauseId' | 'answer' | 'answeredVia' | 'answeredAt'>
->;
+> & { answeredBy?: AnsweredBy };
 
 /**
  * The wait `run` sits at once `write` lands: the stored wait, labels and revision

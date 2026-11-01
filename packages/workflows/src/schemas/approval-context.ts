@@ -6,6 +6,7 @@ import { tokenUsageSchema } from '@archon/provider-contract';
 import { approvalDecisionConfigSchema } from './gate-node';
 import { nodeExecutionMetadataSchema } from './node-execution';
 import { suspendReasonSchema } from './node-state';
+import { answeredBySchema } from './answered-by';
 import { recordSurfaceSchema } from './record-surface';
 import { isTerminalRunStatus, type WorkflowRunStatus } from './run-status';
 import { bodySessionCursorAncestrySchema, bodySessionCursorsSchema } from './run-wait';
@@ -124,11 +125,14 @@ const approvalContextBaseSchema = z.object({
   resolved: z.enum(['approved', 'rejected']).nullable().optional(),
   /**
    * Audit facts of the answer that set `resolved`: the surface it arrived through
-   * (`cli`, `api`, `manage_run`, or a chat platform id) and when it was committed. Never
-   * who answered. Replaced with the rest of the context by the next pause.
+   * (`cli`, `api`, `manage_run`, or a chat platform id), when it was committed, and the
+   * resolved actor Archon authorized. `answeredBy` is additive and optional so gates
+   * resolved by older builds still parse. Replaced with the rest of the context by the
+   * next pause.
    */
   answeredVia: recordSurfaceSchema.optional(),
   answeredAt: z.string().optional(),
+  answeredBy: answeredBySchema.optional(),
   /**
    * Interactive-loop only. True when the iteration this gate paused on emitted the
    * completion signal (detectCompletionSignal / until_bash exit 0). Read at resume by

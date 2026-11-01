@@ -1509,6 +1509,95 @@ describe('workflowGetCommand', () => {
     expect(code).toBe(0);
   });
 
+  it('exposes the gate audit actor, decision, timestamp, and occurrence in JSON', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    const workflowEventsDb = await import('@archon/core/db/workflow-events');
+    const metadata = {
+      approval_response: 'review-hypothesis',
+      approval: {
+        nodeId: 'hypothesis-gate',
+        message: 'Review the hypothesis?',
+        type: 'approval',
+        pauseId: 'gate-1',
+        resolved: 'approved',
+        answeredVia: 'slack',
+        answeredAt: '2026-11-01T00:05:00.000Z',
+        answeredBy: { kind: 'user', userId: 'archon-admin' },
+      },
+    };
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-gate-audit',
+      workflow_name: 'investigate',
+      status: 'paused',
+      working_path: '/tmp/wt',
+      started_at: new Date(),
+      metadata,
+      checkout_baseline: null,
+    });
+    (workflowEventsDb.listWorkflowEvents as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+
+    const code = await workflowGetCommand(createTestWorkflowHost(), 'run-gate-audit', true);
+
+    const parsed = JSON.parse(firstJsonPayload(stdoutSpy)) as {
+      metadata: {
+        approval_response: string;
+        approval: Record<string, unknown>;
+      };
+    };
+    expect(parsed.metadata.approval_response).toBe('review-hypothesis');
+    expect(parsed.metadata.approval).toMatchObject({
+      resolved: 'approved',
+      answeredVia: 'slack',
+      answeredAt: '2026-11-01T00:05:00.000Z',
+      answeredBy: { kind: 'user', userId: 'archon-admin' },
+      pauseId: 'gate-1',
+    });
+    expect(code).toBe(0);
+  });
+
+  it('exposes the attention audit actor, decision, timestamp, and occurrence in JSON', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    const workflowEventsDb = await import('@archon/core/db/workflow-events');
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-attention-audit',
+      workflow_name: 'investigate',
+      status: 'paused',
+      working_path: '/tmp/wt',
+      started_at: new Date(),
+      metadata: {
+        wait: {
+          owner: 'node',
+          nodeId: 'hypothesis-review',
+          kind: 'attention',
+          waitingSince: '2026-11-01T00:00:00.000Z',
+          message: 'Review the hypothesis',
+          pauseId: 'ask-1',
+          form: 'approval',
+          answer: { decision: 'approve', text: '' },
+          answeredVia: 'slack',
+          answeredAt: '2026-11-01T00:05:00.000Z',
+          answeredBy: { kind: 'user', userId: 'archon-admin' },
+        },
+      },
+      checkout_baseline: null,
+    });
+    (workflowEventsDb.listWorkflowEvents as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+
+    const code = await workflowGetCommand(createTestWorkflowHost(), 'run-attention-audit', true);
+
+    const parsed = JSON.parse(firstJsonPayload(stdoutSpy)) as {
+      metadata: { wait: Record<string, unknown> };
+    };
+    expect(parsed.metadata.wait).toMatchObject({
+      answer: { decision: 'approve', text: '' },
+      answeredVia: 'slack',
+      answeredAt: '2026-11-01T00:05:00.000Z',
+      answeredBy: { kind: 'user', userId: 'archon-admin' },
+      pauseId: 'ask-1',
+    });
+    expect(code).toBe(0);
+  });
+
   it('exposes the transcript path from a trusted persisted output root', async () => {
     const previousHome = process.env.ARCHON_HOME;
     const archonHome = join(tmpdir(), 'archon-get-transcript-home');

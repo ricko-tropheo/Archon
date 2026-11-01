@@ -66,6 +66,7 @@ describe('rejectWorkflow', () => {
           resolved: 'rejected',
           answeredVia: 'cli',
           answeredAt: expect.any(String),
+          answeredBy: { kind: 'operator' },
         },
         rejection_reason: 'needs more tests',
         rejection_count: 1,
@@ -76,6 +77,7 @@ describe('rejectWorkflow', () => {
           step_name: 'review',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'rejected',
             reason: 'needs more tests',
@@ -166,6 +168,7 @@ describe('rejectWorkflow', () => {
           step_name: 'review',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'rejected',
             reason: 'still broken',
@@ -196,6 +199,7 @@ describe('rejectWorkflow', () => {
           step_name: 'review',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'rejected',
             reason: 'no good',
@@ -271,6 +275,7 @@ describe('rejectWorkflow', () => {
           resolved: 'rejected',
           answeredVia: 'cli',
           answeredAt: expect.any(String),
+          answeredBy: { kind: 'operator' },
         },
       },
       [
@@ -288,6 +293,7 @@ describe('rejectWorkflow', () => {
           step_name: 'review',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'rejected',
             reason: 'needs changes',
@@ -491,6 +497,7 @@ describe('rejectWorkflow', () => {
           resolved: 'rejected',
           answeredVia: 'cli',
           answeredAt: expect.any(String),
+          answeredBy: { kind: 'operator' },
         },
         approval_response: 'rejected',
       },
@@ -500,6 +507,7 @@ describe('rejectWorkflow', () => {
           step_name: '__writeback__',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'rejected',
             gate: 'writeback',

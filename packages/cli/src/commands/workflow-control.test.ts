@@ -1415,6 +1415,7 @@ describe('workflowRejectCommand', () => {
           step_name: 'gate',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'rejected',
             reason: 'not good',
@@ -1507,6 +1508,7 @@ describe('workflowRejectCommand', () => {
           resolved: 'rejected',
           answeredVia: 'cli',
           answeredAt: expect.any(String),
+          answeredBy: { kind: 'operator' },
         },
       },
       [
@@ -1524,6 +1526,7 @@ describe('workflowRejectCommand', () => {
           step_name: 'gate',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'rejected',
             reason: 'Rejected',
@@ -1622,6 +1625,7 @@ describe('workflowRejectCommand', () => {
           resolved: 'rejected',
           answeredVia: 'cli',
           answeredAt: expect.any(String),
+          answeredBy: { kind: 'operator' },
         },
         rejection_reason: 'needs work',
         rejection_count: 1,
@@ -1632,6 +1636,7 @@ describe('workflowRejectCommand', () => {
           step_name: 'gate',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'rejected',
             reason: 'needs work',
@@ -1737,6 +1742,7 @@ describe('workflowRejectCommand', () => {
           step_name: 'gate',
           data: {
             via: 'cli',
+            answeredBy: { kind: 'operator' },
             occurrence: expect.any(String),
             decision: 'rejected',
             reason: 'still bad',

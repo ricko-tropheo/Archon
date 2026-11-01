@@ -12,6 +12,7 @@ import { nodeExecutionMetadataSchema } from '@archon/workflows/schemas/node-exec
 import { gateOccurrence } from '@archon/workflows/schemas/workflow-run';
 import type { ApprovalContext, WorkflowRun } from '@archon/workflows/schemas/workflow-run';
 import type { GateResolutionEvent } from '@archon/workflows/store';
+import type { RunActor } from '../run-authorization';
 import { getLog } from './context';
 import type { GateAnswerOrigin } from './answer-admission';
 
@@ -157,17 +158,23 @@ export function gateCompletionEvent(
   };
 }
 
-/** The gate context a resolution writes: the decision plus the answer's surface and time. */
+/**
+ * The gate context a resolution writes: the decision plus the answer's surface, time,
+ * and the resolved actor Archon already authorized. `answeredBy` is additive audit
+ * data; nothing reads it to route behavior.
+ */
 export function answeredGate(
   approval: ApprovalContext | undefined,
   resolved: 'approved' | 'rejected',
-  origin: GateAnswerOrigin
+  origin: GateAnswerOrigin,
+  actor: RunActor
 ): Record<string, unknown> {
   return {
     ...approval,
     resolved,
     answeredVia: origin.via,
     answeredAt: new Date().toISOString(),
+    answeredBy: actor,
   };
 }
 

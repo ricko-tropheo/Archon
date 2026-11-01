@@ -8,6 +8,7 @@ import { workflowRunOutcomeSchema, workflowRunStatusSchema } from './run-status'
 
 export * from './run-status';
 export * from './run-wait';
+export * from './answered-by';
 export * from './pause-occurrence';
 export * from './node-output';
 export * from './run-metadata';
