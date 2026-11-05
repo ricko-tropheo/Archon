@@ -17,6 +17,8 @@ import type {
   WorkflowRequest,
 } from '../types';
 import * as codebaseDb from '../db/codebases';
+import * as workflowDb from '../db/workflows';
+import { ResumeRefusedError } from '../operations/workflow-operations';
 import { toError } from '../utils/error';
 import { getLog } from './agent-log';
 import { dispatchOrchestratorWorkflowOwned } from './dispatch/owned-dispatch';
@@ -104,6 +106,47 @@ export async function continueResolvedGateRun(
     });
   };
 
+  // The turn that resolved the gate can outlive the pause: a live executor may
+  // notice the decision and resume the run itself before this post-turn
+  // continuation runs. Dispatching a second resume then refuses a running run
+  // and reports a failure the operator cannot act on, so refresh first and let
+  // the owner that is already continuing the run keep it.
+  let current = run;
+  try {
+    current = (await workflowDb.getWorkflowRun(run.id)) ?? run;
+  } catch (error) {
+    getLog().warn(
+      { err: toError(error), conversationId, workflowRunId: run.id, action },
+      'orchestrator.gate_continuation_status_unavailable'
+    );
+  }
+  if (current.status === 'running') {
+    getLog().info(
+      { conversationId, workflowRunId: run.id, workflowName: run.workflow_name, action },
+      'orchestrator.gate_continuation_already_running'
+    );
+    await notify(
+      `${decision}. **${run.workflow_name}** is already running — no separate resume is needed.`
+    );
+    return;
+  }
+  if (current.status === 'completed' || current.status === 'cancelled') {
+    getLog().info(
+      {
+        conversationId,
+        workflowRunId: run.id,
+        workflowName: run.workflow_name,
+        action,
+        status: current.status,
+      },
+      'orchestrator.gate_continuation_already_finished'
+    );
+    await notify(
+      `${decision}. **${run.workflow_name}** already finished (${current.status}); nothing to resume.`
+    );
+    return;
+  }
+
   try {
     if (!codebase) {
       getLog().warn(
@@ -152,6 +195,22 @@ export async function continueResolvedGateRun(
             'before starting another run on this project.'
         );
         return;
+      }
+      // The status can change between the refresh above and the resume. A run
+      // that started in that window is already continuing; do not tell the
+      // operator to resume a running run.
+      if (error instanceof ResumeRefusedError) {
+        const latest = await workflowDb.getWorkflowRun(run.id).catch(() => null);
+        if (latest?.status === 'running') {
+          getLog().info(
+            { conversationId, workflowRunId: run.id, workflowName: run.workflow_name, action },
+            'orchestrator.gate_continuation_already_running'
+          );
+          await notify(
+            `${decision}. **${run.workflow_name}** is already running — no separate resume is needed.`
+          );
+          return;
+        }
       }
       getLog().error(
         { err, errorType: err.constructor.name, conversationId, workflowRunId: run.id, action },

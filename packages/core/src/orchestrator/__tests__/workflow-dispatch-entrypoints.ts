@@ -35,6 +35,7 @@ import {
 import { handleMessage } from '../orchestrator-agent';
 import { continueResolvedGateRun } from '../workflow-dispatch';
 import { TerminalStatusWriteError } from '@archon/workflows/terminal-status-write';
+import { ResumeRefusedError } from '../../operations/workflow-operations';
 
 export function registerNoProjectTests() {
   // ─── handleWorkflowRunCommand — no project attached ──────────────────────────
@@ -316,6 +317,42 @@ export function registerGateContinuationTests(trackTempRoot: ReturnType<typeof t
       mockResolveContinuationWorkflow.mockImplementation(() => Promise.resolve(undefined));
       mockDiscoverWorkflowsWithConfig.mockReset();
       mockDiscoverWorkflowsWithConfig.mockResolvedValue({ workflows: [], errors: [] });
+    });
+
+    test('does not dispatch a second resume for a run a live owner already continues', async () => {
+      mockGetWorkflowRunDb.mockResolvedValue(makeRun({ ...makeGateRun(), status: 'running' }));
+      const platform = makePlatform();
+      await continueResolvedGateRun(
+        platform,
+        'conv-1',
+        makeConversation({ codebase_id: 'codebase-1' }),
+        makeCodebase(),
+        makeGateRun(),
+        'approve',
+        operator
+      );
+      expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+      const messages = (platform.sendMessage as ReturnType<typeof mock>).mock.calls.map(
+        c => (c as unknown[])[1] as string
+      );
+      expect(messages.some(message => message.includes('already running'))).toBe(true);
+      expect(messages.some(message => message.includes('Continuation requested'))).toBe(false);
+      expect(messages.some(message => message.includes('resuming'))).toBe(false);
+      expect(messages.some(message => message.includes('retry with'))).toBe(false);
+    });
+
+    test('a running refusal during dispatch reports already-running, not retry-resume', async () => {
+      const running = makeRun({ ...makeGateRun(), status: 'running' });
+      // The pre-check sees a paused run; by the time the dispatch resumes it, the
+      // owner has continued the run and every later read reports `running`.
+      mockGetWorkflowRunDb.mockResolvedValueOnce(makeGateRun()).mockResolvedValue(running);
+      const messages = await continueWithRejection(
+        makePlatform(),
+        new ResumeRefusedError("Cannot resume run with status 'running'.")
+      );
+      expect(messages.some(message => message.includes('already running'))).toBe(true);
+      expect(messages.some(message => message.includes('retry with'))).toBe(false);
+      expect(messages.some(message => message.includes('ResumeRefused'))).toBe(false);
     });
 
     test("continues with the graph the run froze, not the chat turn's discovery list", async () => {

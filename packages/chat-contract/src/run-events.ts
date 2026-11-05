@@ -18,6 +18,13 @@ export const chatRunEventSchema = z.discriminatedUnion('type', [
     state: z.enum(['running', 'completed', 'failed', 'skipped']),
     durationMs: z.number().nonnegative().optional(),
     error: z.string().optional(),
+    /**
+     * A bounded excerpt of the node's live agent output. Present on the periodic
+     * progress projection so a chat surface can show work in progress without a
+     * new event variant; a surface that does not know the field still sees an
+     * ordinary running node.
+     */
+    progress: z.string().min(1).optional(),
   }),
   z.object({
     type: z.literal('approval_pending'),
@@ -27,6 +34,9 @@ export const chatRunEventSchema = z.discriminatedUnion('type', [
     decisions: z.array(chatApprovalDecisionSchema),
     pauseId: id.optional(),
     authoredOutcome: chatAuthoredOutcomeSchema.optional(),
+    /** Present so a surface that missed `workflow_started` can seed its run state. */
+    conversationId: id.optional(),
+    workflowName: id.optional(),
   }),
   z.object({
     type: z.literal('terminal'),
@@ -35,6 +45,9 @@ export const chatRunEventSchema = z.discriminatedUnion('type', [
     error: z.string().optional(),
     authoredOutcome: chatAuthoredOutcomeSchema.optional(),
     totalCostUsd: z.number().nonnegative().optional(),
+    /** Present so a surface that missed `workflow_started` can still close out a run. */
+    conversationId: id.optional(),
+    workflowName: id.optional(),
   }),
 ]);
 export type ChatRunEvent = z.infer<typeof chatRunEventSchema>;

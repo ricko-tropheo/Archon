@@ -94,12 +94,26 @@ Socket Mode connection -- no public URL needed.
 
 ## Step 4c: Register Slash Commands
 
-Two slash commands give the team an alternative to @mention:
+Register `/archon` for conversation and `/archon-workflow` for direct workflow
+control. `/workflow` is accepted as an alias of `/archon-workflow` in mentions
+and direct messages, and every control also works without the bot mention.
 
 | Command | What it does |
 | --- | --- |
 | `/archon <message>` | Starts a new thread in the current channel. To continue an existing thread, post `@archon <message>` in that thread. |
-| `/archon-workflow <subcommand>` | Direct workflow control. Supports `list`, `status`, `get <id>`, `run <name> <args>`, `approve <id> [comment]`, `reject <id> [reason]`, `respond <id> <decision> [text]`, `abandon <id>`, `resume <id>`. |
+| `/archon-workflow <subcommand>` | Direct workflow control. `/workflow <subcommand>` is the canonical alias. Supports `list`, `status`, `get <id>`, `run <name> <args>`, `approve <id> [comment]`, `reject <id> [reason]`, `respond <id> <decision> [text]`, `abandon <id>`, `resume <id>`. |
+
+### One control surface
+
+Use the button when it is present; the command is the fallback. The bot mention
+is optional, and `/workflow` and `/archon-workflow` execute identically.
+
+| Situation | Primary action | Fallback command |
+| --- | --- | --- |
+| Start a run | `@your-bot /workflow run <name> <args>` | `/workflow run <name> <args>` or `/archon-workflow run <name> <args>` |
+| Answer a gate | Click a decision button on the approval card | `/workflow respond <id> <decision> [text]` (or `approve`/`reject`) |
+| Resume a failed run | Click **Resume** on the failed status card | `/workflow resume <id>` |
+| Abandon a run | Click **Abandon** on the failed status card | `/workflow abandon <id>` |
 
 For each command:
 

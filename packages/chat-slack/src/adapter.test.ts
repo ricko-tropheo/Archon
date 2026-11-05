@@ -78,6 +78,15 @@ test('mention normalization preserves prose and normalizes Slack links and reset
   expect(stripBotMention(' ReSeT ')).toBe('/reset');
   expect(stripBotMention('please reset the repository')).toBe('please reset the repository');
 });
+
+test('the plugin prefix is an alias for the one workflow namespace', () => {
+  expect(stripBotMention('<@UABC> /archon-workflow resume 33d9ac68')).toBe(
+    '/workflow resume 33d9ac68'
+  );
+  expect(stripBotMention('/archon-workflow approve 33d9ac68')).toBe('/workflow approve 33d9ac68');
+  expect(stripBotMention('/workflow resume 33d9ac68')).toBe('/workflow resume 33d9ac68');
+  expect(stripBotMention('/archon-workflows are prose')).toBe('/archon-workflows are prose');
+});
 test('mentions carry display names and retain the triggering message', async () => {
   await start();
   await slack.events.get('app_mention')!({ event });
@@ -165,6 +174,15 @@ test('slash commands seed threads and translate the registered workflow command'
     conversationId: 'C1:msg-1',
     text: '/workflow run assist',
   });
+});
+test('/workflow and /archon-workflow execute the same control path', async () => {
+  await start();
+  await slash('resume 33d9ac68', '/archon-workflow');
+  await slash('resume 33d9ac68', '/workflow');
+  expect(inbound.mock.calls.map(call => (call[0] as { text?: string }).text)).toEqual([
+    '/workflow resume 33d9ac68',
+    '/workflow resume 33d9ac68',
+  ]);
 });
 test('ordinary slash commands use the same inbound flow', async () => {
   await start();
@@ -273,7 +291,7 @@ test('workflow registration and slash text follow the descriptor prefix', async 
   descriptor.workflowCommand.prefix = '/test-workflow ';
   try {
     await start();
-    expect([...slack.commands.keys()]).toEqual(['/archon', '/test-workflow']);
+    expect([...slack.commands.keys()]).toEqual(['/archon', '/test-workflow', '/workflow']);
     expect((await slash('', '/test-workflow'))[0]).toBe(
       'Usage: `/test-workflow <subcommand>` — e.g. `list`, `status`, `get <id>`, `run <name> <args>`, `approve <id>`, `reject <id> <reason>`, `abandon <id>`.'
     );

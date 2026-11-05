@@ -129,7 +129,12 @@ test.each([false, true])(
       expect(first.map(event => event.runId)).toEqual(Array(4).fill(runs[0]!.id));
       expect(second.map(event => event.runId)).toEqual(Array(4).fill(runs[1]!.id));
       expect(first[0]).toMatchObject({ conversationId: 'thread-fixture-chat' });
-      expect(first[2]).toMatchObject({ type: 'approval_pending', authoredOutcome: 'succeeded' });
+      expect(first[2]).toMatchObject({
+        type: 'approval_pending',
+        authoredOutcome: 'succeeded',
+        conversationId: 'thread-fixture-chat',
+        workflowName: 'fixture',
+      });
       expect(first[3]).toMatchObject({
         type: 'terminal',
         authoredOutcome: 'succeeded',
@@ -426,6 +431,69 @@ test('a terminal run posts its output and actionable failure commands to the con
     expect(sent[1]).toContain('node review failed');
     expect(sent[1]).toContain(`Resume: \`/archon-workflow resume ${run.id}\``);
     expect(sent[1]).toContain(`Stop: \`/archon-workflow abandon ${run.id}\``);
+  } finally {
+    unsubscribe();
+  }
+});
+
+test('provider text is coalesced into a bounded progress event', async () => {
+  const delivered: ChatRunEvent[] = [];
+  const supervisor = new ChatSupervisor(
+    { descriptor: { ...descriptor, id: 'fixture-chat' }, argv: [process.execPath] },
+    () => {},
+    () => {}
+  );
+  supervisor.runEvent = async event => {
+    delivered.push(event);
+  };
+  const unsubscribe = subscribeChatRunEvents(new Map([['fixture-chat', supervisor]]), new Map(), {
+    progressIntervalMs: 5,
+  });
+  try {
+    const run = await createRun('fixture-chat');
+    const emitter = getWorkflowEventEmitter();
+    emitter.emit({
+      type: 'workflow_started',
+      runId: run.id,
+      workflowName: 'fixture',
+      conversationId: run.conversation_id,
+      transcriptPath: '/private/path',
+    });
+    emitter.emit({
+      type: 'node_started',
+      runId: run.id,
+      nodeId: 'plan',
+      nodeName: 'Plan node',
+    });
+    emitter.emit({
+      type: 'provider_event',
+      runId: run.id,
+      stepName: 'plan',
+      attemptId: 'attempt-1',
+      seq: 0,
+      observedAt: new Date().toISOString(),
+      event: {
+        type: 'agent_message_chunk',
+        text: 'Drafting the plan with xoxb-1234567890-secret',
+      },
+    });
+    const deadline = Date.now() + DEFAULT_TEST_TIMEOUT_MS;
+    while (delivered.filter(event => event.type === 'node_state').length < 2) {
+      if (Date.now() > deadline) throw new Error('Progress event was not delivered');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    const progress = delivered.find(
+      event => event.type === 'node_state' && event.progress !== undefined
+    ) as Extract<ChatRunEvent, { type: 'node_state' }> | undefined;
+    if (!progress) throw new Error('Progress event was not delivered');
+    expect(progress.type).toBe('node_state');
+    expect(progress.runId).toBe(run.id);
+    expect(progress.nodeId).toBe('plan');
+    expect(progress.nodeName).toBe('Plan node');
+    expect(progress.state).toBe('running');
+    expect(progress.progress).toContain('Drafting the plan');
+    expect(JSON.stringify(progress)).not.toContain('xoxb-');
+    expect(JSON.stringify(progress)).toContain('[redacted]');
   } finally {
     unsubscribe();
   }

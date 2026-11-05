@@ -66,9 +66,11 @@ export async function serveFixture(plugin: ChatPlugin): Promise<void> {
     const actionId =
       action.action === 'cancel'
         ? `cancel:${action.runId}`
-        : notice
-          ? 'attention:choose:0'
-          : 'respond:0';
+        : action.action === 'abandon'
+          ? `abandon:${action.runId}`
+          : notice
+            ? 'attention:choose:0'
+            : 'respond:0';
     const handler = slack.actions.find(entry => entry.pattern.test(actionId));
     if (!handler) throw new Error('missing Slack action handler');
     actionResult = undefined;
@@ -83,7 +85,7 @@ export async function serveFixture(plugin: ChatPlugin): Promise<void> {
         type: 'button',
         action_id: actionId,
         value:
-          action.action === 'cancel'
+          action.action === 'cancel' || action.action === 'abandon'
             ? undefined
             : notice
               ? JSON.stringify(action)

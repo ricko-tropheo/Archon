@@ -347,6 +347,19 @@ describe('buildStatusBlocks', () => {
     expect(ctx.elements[0]?.text).toContain('reason: Type error in plan node');
   });
 
+  test('terminal failed snapshot offers Resume and Abandon instead of Cancel', () => {
+    const { blocks } = buildStatusBlocks(snapshot({ status: 'failed' }), startedAt + 1000);
+    const actions = blocks.find(b => (b as { type: string }).type === 'actions') as {
+      elements: Array<{ action_id: string; text: { text: string } }>;
+    };
+    expect(actions.elements.map(element => element.text.text)).toEqual(['Resume', 'Abandon']);
+    expect(actions.elements.map(element => element.action_id)).toEqual([
+      'resume:a1b2c3d4-zzzz',
+      'abandon:a1b2c3d4-zzzz',
+    ]);
+    expect(JSON.stringify(blocks)).not.toContain('cancel:a1b2c3d4-zzzz');
+  });
+
   test('terminal cancelled snapshot also surfaces reason', () => {
     const { blocks } = buildStatusBlocks(
       snapshot({

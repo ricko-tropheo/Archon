@@ -187,7 +187,7 @@ export function registerChatInbound(
   };
   const respondToRun = async (
     operations: Operations,
-    action: Exclude<ChatRunAction, { action: 'answer' | 'resume' | 'cancel' }>,
+    action: Exclude<ChatRunAction, { action: 'answer' | 'resume' | 'cancel' | 'abandon' }>,
     actor: ChatActor
   ): Promise<ChatRunActionResponse> => {
     const response = action.response;
@@ -262,6 +262,19 @@ export function registerChatInbound(
       }
       if (action.action === 'answer') return await answerRun(operations, action, actor);
       if (action.action === 'cancel') return await cancelRun(operations, action, actor);
+      if (action.action === 'abandon') {
+        const result = await operations.abandonWorkflow(action.runId, actor);
+        return {
+          status: 'done',
+          result: {
+            kind: 'abandoned',
+            cancelled: true,
+            cleanupWarnings: result.cleanupWarnings,
+            cascadeFailures: result.cascadeFailures,
+            blockedParentRunId: result.blockedParentRunId,
+          },
+        };
+      }
       return await respondToRun(operations, action, actor);
     } catch (error) {
       return actionFailure(error, action);

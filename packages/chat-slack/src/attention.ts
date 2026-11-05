@@ -290,5 +290,7 @@ function settledVerb(action: ChatRunAction): string {
       return ':arrow_forward: Resumed';
     case 'cancel':
       return ':no_entry: Cancelled';
+    case 'abandon':
+      return ':no_entry: Abandoned';
   }
 }

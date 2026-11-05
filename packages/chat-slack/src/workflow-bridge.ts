@@ -79,32 +79,35 @@ export class SlackWorkflowBridge {
   private async renderEvent(event: ChatRunEvent): Promise<void> {
     switch (event.type) {
       case 'workflow_started': {
-        const [channel, threadTs] = splitConversationId(event.conversationId);
-        const state: RunState = {
+        // A gate can arrive before this event when a plugin attaches to a run
+        // already in flight; that path seeds state from the approval event. Do
+        // not post a second status card for a run this bridge already knows.
+        const existing = this.runs.get(event.runId);
+        if (existing?.statusMessageTs) {
+          existing.workflowName = event.workflowName;
+          existing.status = 'running';
+          await this.updateStatusMessage(existing);
+          return;
+        }
+        // A state seeded by a gate has no status message yet; a failed first
+        // post leaves no usable state. Replace it and try a fresh post.
+        if (existing) this.runs.delete(event.runId);
+        const state = this.createRunState({
           runId: event.runId,
           workflowName: event.workflowName,
           conversationId: event.conversationId,
-          channel,
-          threadTs,
-          startedAt: Date.now(),
           status: 'running',
-          nodes: new Map(),
-          approvals: new Map(),
-        };
-        this.runs.set(event.runId, state);
+        });
         const trigger = this.adapter.getTriggeringMessage(event.conversationId);
         if (trigger) await this.addReactionSafe(trigger, REACTION_RUNNING);
-        const { blocks, fallbackText } = buildStatusBlocks(this.snapshot(state));
-        const result = await this.adapter.getApp().client.chat.postMessage({
-          channel,
-          thread_ts: threadTs,
-          text: fallbackText,
-          blocks,
-        });
-        state.statusMessageTs = result.ts;
+        await this.postStatusMessage(state, false);
         return;
       }
       case 'node_state':
+        if (event.progress !== undefined) {
+          await this.onProgress(event);
+          return;
+        }
         if (event.state === 'running') {
           const state = this.runs.get(event.runId);
           if (state) {
@@ -124,8 +127,82 @@ export class SlackWorkflowBridge {
     }
   }
 
-  private async onTerminal(event: Extract<ChatRunEvent, { type: 'terminal' }>): Promise<void> {
+  private createRunState(input: {
+    runId: string;
+    workflowName: string;
+    conversationId: string;
+    status: RunState['status'];
+  }): RunState {
+    const [channel, threadTs] = splitConversationId(input.conversationId);
+    const state: RunState = {
+      runId: input.runId,
+      workflowName: input.workflowName,
+      conversationId: input.conversationId,
+      channel,
+      threadTs,
+      startedAt: Date.now(),
+      status: input.status,
+      nodes: new Map(),
+      approvals: new Map(),
+    };
+    this.runs.set(input.runId, state);
+    return state;
+  }
+
+  private async postStatusMessage(state: RunState, swallowErrors = true): Promise<void> {
+    const { blocks, fallbackText } = buildStatusBlocks(this.snapshot(state));
+    try {
+      const result = await this.adapter.getApp().client.chat.postMessage({
+        channel: state.channel,
+        thread_ts: state.threadTs,
+        text: fallbackText,
+        blocks,
+      });
+      state.statusMessageTs = result.ts;
+    } catch (error) {
+      if (!swallowErrors) throw error;
+      logFailure('slack.bridge_status_post_failed', error);
+    }
+  }
+
+  /**
+   * Build state for a run this bridge did not see start. A gate or terminal event
+   * carries enough identity (conversation + workflow) to render its card; the
+   * status message is posted once so later node edits have a target.
+   */
+  private async seedRunState(
+    event: { runId: string; conversationId?: string; workflowName?: string },
+    status: RunState['status']
+  ): Promise<RunState | undefined> {
+    if (!event.conversationId) return undefined;
+    const state = this.createRunState({
+      runId: event.runId,
+      workflowName: event.workflowName ?? event.runId.slice(0, 8),
+      conversationId: event.conversationId,
+      status,
+    });
+    await this.postStatusMessage(state);
+    return state;
+  }
+
+  private async onProgress(event: Extract<ChatRunEvent, { type: 'node_state' }>): Promise<void> {
     const state = this.runs.get(event.runId);
+    // The server bounds and redacts the excerpt before it reaches this plugin.
+    if (!state || event.progress === undefined) return;
+    try {
+      await this.adapter.getApp().client.chat.postMessage({
+        channel: state.channel,
+        thread_ts: state.threadTs,
+        text: `:hourglass_flowing_sand: *${event.nodeName}*\n${event.progress}`,
+      });
+    } catch (error) {
+      logFailure('slack.bridge_progress_post_failed', error);
+    }
+  }
+
+  private async onTerminal(event: Extract<ChatRunEvent, { type: 'terminal' }>): Promise<void> {
+    let state = this.runs.get(event.runId);
+    if (!state) state = await this.seedRunState(event, 'running');
     if (!state) return;
     this.runs.delete(event.runId);
     clearTimeout(state.pendingEdit);
@@ -157,7 +234,11 @@ export class SlackWorkflowBridge {
   private async onApprovalPending(
     event: Extract<ChatRunEvent, { type: 'approval_pending' }>
   ): Promise<void> {
-    const state = this.runs.get(event.runId);
+    // A fresh run's first gate can arrive before the bridge saw its
+    // `workflow_started` (for example when the plugin attached late). The
+    // approval event now carries the conversation and workflow, so seed the
+    // run state instead of dropping the first button card.
+    const state = this.runs.get(event.runId) ?? (await this.seedRunState(event, 'paused'));
     if (!state) {
       logFailure('slack.bridge_approval_no_run', new Error('Slack rendering unavailable'));
       return;
@@ -326,6 +407,94 @@ export class SlackWorkflowBridge {
       await ack();
       await this.handleCancelClick(body, action);
     });
+    app.action<BlockButtonAction>(/^resume:/, async ({ ack, body, action }) => {
+      await ack();
+      await this.handleResumeClick(body, action);
+    });
+    app.action<BlockButtonAction>(/^abandon:/, async ({ ack, body, action }) => {
+      await ack();
+      await this.handleAbandonClick(body, action);
+    });
+  }
+
+  private async handleResumeClick(body: BlockButtonAction, action: ButtonAction): Promise<void> {
+    const runId = action.action_id.slice('resume:'.length);
+    if (!runId) return;
+    try {
+      const response = await this.ctx.runAction({
+        action: 'resume',
+        runId,
+        sender: { platformUserId: body.user.id },
+      });
+      if (response.status === 'rejected') return;
+      if (response.status === 'forbidden') {
+        await this.postForbiddenAction(body, response.message);
+        return;
+      }
+      if (response.status === 'refused') {
+        await this.postActionNote(
+          body,
+          runId,
+          `:warning: ${response.message}` +
+            (response.abandonHint ? `\n${response.abandonHint}` : '')
+        );
+        return;
+      }
+      const result = response.result;
+      if (result.kind === 'resumed') {
+        await this.postActionNote(
+          body,
+          runId,
+          result.resumed
+            ? 'Resume requested — the run continues in this thread.'
+            : `:warning: ${notResumedNote(result)}`
+        );
+      }
+    } catch (err) {
+      logFailure('action.resume', err);
+      await this.postActionNote(
+        body,
+        runId,
+        ':warning: Could not resume the run. Check the run status and server logs.'
+      );
+    }
+  }
+
+  private async handleAbandonClick(body: BlockButtonAction, action: ButtonAction): Promise<void> {
+    const runId = action.action_id.slice('abandon:'.length);
+    if (!runId) return;
+    try {
+      const response = await this.ctx.runAction({
+        action: 'abandon',
+        runId,
+        sender: { platformUserId: body.user.id },
+      });
+      if (response.status === 'rejected') return;
+      if (response.status === 'forbidden') {
+        await this.postForbiddenAction(body, response.message);
+        return;
+      }
+      if (response.status === 'refused') {
+        await this.postActionNote(body, runId, `:warning: ${response.message}`);
+        return;
+      }
+      const result = response.result;
+      if (result.kind !== 'abandoned') return;
+      let note = `Abandoned run \`${runId}\` — it will not resume.`;
+      for (const warning of result.cleanupWarnings ?? []) note += `\n:warning: ${warning}`;
+      if (result.cascadeFailures > 0)
+        note += `\n:warning: ${String(result.cascadeFailures)} sub-run(s) could not be cancelled and may still be running.`;
+      if (result.blockedParentRunId)
+        note += `\n:warning: Parent run \`${result.blockedParentRunId}\` was blocked on this sub-run and stays paused.`;
+      await this.postActionNote(body, runId, note);
+    } catch (err) {
+      logFailure('action.abandon', err);
+      await this.postActionNote(
+        body,
+        runId,
+        ':warning: Could not abandon the run. Check the run status and server logs.'
+      );
+    }
   }
 
   private async handleApprovalDecision(
@@ -452,7 +621,9 @@ export class SlackWorkflowBridge {
   ): Promise<void> {
     const state = this.runs.get(runId);
     const fallbackChannel = body.channel?.id;
-    const fallbackThreadTs = body.message?.ts;
+    // A terminal status card is a thread reply; its own ts is not the thread
+    // parent. Prefer the message's thread_ts so recovery notes stay in-thread.
+    const fallbackThreadTs = body.message?.thread_ts ?? body.message?.ts;
     const target = state
       ? { channel: state.channel, thread_ts: state.threadTs }
       : fallbackChannel
@@ -554,6 +725,7 @@ export function resolutionNote(result: RunActionResult): string | undefined {
       return result.resumed ? 'workflow resumed' : notResumedNote(result);
     case 'cooperative':
     case 'stopped':
+    case 'abandoned':
       return undefined;
   }
 }

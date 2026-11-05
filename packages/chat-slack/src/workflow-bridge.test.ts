@@ -88,6 +88,96 @@ test('host-owned conversations render after restart without an in-memory trigger
   expect(slack.posts[0]).toMatchObject({ channel: 'C2', thread_ts: '2' });
   expect(slack.added).toHaveLength(0);
 });
+test('a first gate on a fresh run seeds state and posts its button card', async () => {
+  await plugin.onRunEvent({
+    type: 'approval_pending',
+    runId: 'fresh',
+    nodeId: 'requirements-gate',
+    message: 'Review the requirements.',
+    decisions: [
+      { id: 'approve', label: 'Approve requirements' },
+      { id: 'abort', label: 'Abort' },
+    ],
+    conversationId: 'C1:1',
+    workflowName: 'feature-delivery',
+  });
+  const posts = JSON.stringify(slack.posts);
+  expect(posts).toContain('Workflow paused');
+  expect(posts).toContain('Approval needed');
+  expect(posts).toContain('Approve requirements');
+  expect(posts).toContain('Abort');
+  expect(posts).toContain('actions');
+});
+
+test('live agent progress posts one node-labelled excerpt', async () => {
+  await started();
+  await plugin.onRunEvent({
+    type: 'node_state',
+    runId: 'run',
+    nodeId: 'plan',
+    nodeName: 'plan',
+    state: 'running',
+    progress: 'Reading the spec and drafting the implementation plan.',
+  });
+  const progress = slack.posts.at(-1) as {
+    channel?: string;
+    thread_ts?: string;
+    text?: string;
+  };
+  expect(progress.channel).toBe('C1');
+  expect(progress.thread_ts).toBe('1');
+  expect(progress.text).toContain('plan');
+  expect(progress.text).toContain('Reading the spec and drafting the implementation plan.');
+  // Progress is not a node transition, so it does not trigger a status edit.
+  expect(slack.updates).toHaveLength(0);
+});
+
+test('a failed terminal card offers Resume and Abandon and Resume executes', async () => {
+  await started();
+  await plugin.onRunEvent({ type: 'terminal', runId: 'run', status: 'failed', error: 'boom' });
+  const terminal = JSON.stringify(slack.updates.at(-1));
+  expect(terminal).toContain('resume:run');
+  expect(terminal).toContain('abandon:run');
+
+  runAction.mockResolvedValue({
+    status: 'done',
+    result: { kind: 'resumed', resumed: true },
+  });
+  await click('resume:run');
+  expect(runAction).toHaveBeenCalledWith({
+    action: 'resume',
+    runId: 'run',
+    sender: { platformUserId: 'U1' },
+  });
+  expect(JSON.stringify(slack.posts)).toContain('Resume requested');
+});
+
+test('Abandon on a failed terminal card executes the release action', async () => {
+  await started();
+  await plugin.onRunEvent({ type: 'terminal', runId: 'run', status: 'failed', error: 'boom' });
+  runAction.mockResolvedValue({
+    status: 'done',
+    result: {
+      kind: 'abandoned',
+      cancelled: true,
+      cleanupWarnings: ['released worktree'],
+      cascadeFailures: 1,
+      blockedParentRunId: 'parent-run',
+    },
+  });
+  await click('abandon:run');
+  expect(runAction).toHaveBeenCalledWith({
+    action: 'abandon',
+    runId: 'run',
+    sender: { platformUserId: 'U1' },
+  });
+  const posts = JSON.stringify(slack.posts);
+  expect(posts).toContain('Abandoned run');
+  expect(posts).toContain('released worktree');
+  expect(posts).toContain('1 sub-run');
+  expect(posts).toContain('parent-run');
+});
+
 test('node bursts debounce status edits and preserve node arrival order', async () => {
   await started();
   for (const state of ['running', 'completed'] as const)

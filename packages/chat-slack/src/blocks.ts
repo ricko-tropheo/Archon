@@ -281,7 +281,26 @@ export function buildStatusBlocks(
   const footer = buildStatusFooter(snapshot, terminalStatus);
   if (footer) blocks.push(footer);
 
-  if (!terminalStatus) {
+  if (terminalStatus === 'failed') {
+    blocks.push({
+      type: 'actions',
+      block_id: `run-recovery:${snapshot.runId}`,
+      elements: [
+        {
+          type: 'button',
+          style: 'primary',
+          text: { type: 'plain_text', text: 'Resume', emoji: true },
+          action_id: `resume:${snapshot.runId}`,
+        },
+        {
+          type: 'button',
+          style: 'danger',
+          text: { type: 'plain_text', text: 'Abandon', emoji: true },
+          action_id: `abandon:${snapshot.runId}`,
+        },
+      ],
+    });
+  } else if (!terminalStatus) {
     blocks.push({
       type: 'actions',
       block_id: `run-controls:${snapshot.runId}`,

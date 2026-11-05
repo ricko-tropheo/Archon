@@ -187,6 +187,25 @@ test('starter cancel succeeds; another member is forbidden; admins can act', asy
   ).toMatchObject({ status: 'done', result: { resumed: true } });
 });
 
+test('abandon releases a failed run; another member is forbidden', async () => {
+  const started = await run();
+  await getDatabase().query(
+    "UPDATE remote_agent_workflow_runs SET status = 'failed' WHERE id = $1",
+    [started.id]
+  );
+  expect(
+    await action({ runId: started.id, action: 'abandon', sender: { platformUserId: 'other' } })
+  ).toMatchObject({ status: 'forbidden' });
+  expect((await getWorkflowRun(started.id))?.status).toBe('failed');
+  expect(
+    await action({ runId: started.id, action: 'abandon', sender: { platformUserId: 'starter' } })
+  ).toMatchObject({
+    status: 'done',
+    result: { kind: 'abandoned', cancelled: true },
+  });
+  expect((await getWorkflowRun(started.id))?.status).toBe('cancelled');
+});
+
 test('approve and declared response preserve gate occurrence and resume with host identity', async () => {
   const paused = await run(true);
   expect(

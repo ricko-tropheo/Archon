@@ -31,6 +31,7 @@ export const chatRunActionSchema = z.discriminatedUnion('action', [
   }),
   z.object({ ...target, action: z.literal('resume') }),
   z.object({ ...target, action: z.literal('cancel') }),
+  z.object({ ...target, action: z.literal('abandon') }),
 ]);
 export type ChatRunAction = z.infer<typeof chatRunActionSchema>;
 
@@ -67,6 +68,13 @@ export const runActionResultSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('stopped'),
     pid: z.number().int().positive(),
+    cleanupWarnings: z.array(z.string()).optional(),
+    cascadeFailures: z.number().int().nonnegative(),
+    blockedParentRunId: id.nullable(),
+  }),
+  z.object({
+    kind: z.literal('abandoned'),
+    cancelled: z.boolean(),
     cleanupWarnings: z.array(z.string()).optional(),
     cascadeFailures: z.number().int().nonnegative(),
     blockedParentRunId: id.nullable(),

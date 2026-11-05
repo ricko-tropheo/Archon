@@ -31,8 +31,12 @@ export function stripBotMention(text: string): string {
     .replace(/^<@[UW][A-Z0-9]+>\s*/g, '')
     .trim()
     .replace(/<(https?:\/\/[^|>]+)(?:\|[^>]+)?>/g, '$1');
+  // `/archon-workflow` is the Slack-registered slash command, but `/workflow`
+  // is the one control namespace. Accept either spelling in mentions and IMs so
+  // controls do not depend on the bot mention or the plugin's old prefix.
+  const aliased = normalized.replace(/^\/archon-workflow\b/i, '/workflow');
   // Slack intercepts /reset before it reaches the bot.
-  return normalized.toLowerCase() === 'reset' ? '/reset' : normalized;
+  return aliased.toLowerCase() === 'reset' ? '/reset' : aliased;
 }
 
 export function splitMessage(text: string): string[] {
@@ -202,9 +206,10 @@ export class SlackAdapter {
         thread_ts: 'thread_ts' in event ? event.thread_ts : undefined,
       });
     });
+    const workflowNames = new Set([descriptor.workflowCommand.prefix.trimEnd(), '/workflow']);
     for (const [kind, name] of [
       ['archon', '/archon'],
-      ['workflow', descriptor.workflowCommand.prefix.trimEnd()],
+      ...[...workflowNames].map(name => ['workflow', name] as const),
     ] as const) {
       this.app.command(name, async ({ command, ack, respond }) => {
         await ack();
