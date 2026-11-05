@@ -8,6 +8,7 @@ import {
 import { formatCostFooter } from './blocks';
 import { logFailure } from './log';
 import { descriptor } from './descriptor';
+import { escapeSlackText } from './text';
 
 const MAX_MARKDOWN_BLOCK_LENGTH = 12000;
 
@@ -257,8 +258,8 @@ export class SlackAdapter {
         channel: command.channel_id,
         text:
           kind === 'archon'
-            ? `<@${command.user_id}> via /archon: ${raw}`
-            : `<@${command.user_id}> ran \`${workflowPrefix}${raw}\``,
+            ? `<@${command.user_id}> via /archon: ${escapeSlackText(raw)}`
+            : `<@${command.user_id}> ran \`${workflowPrefix}${escapeSlackText(raw)}\``,
       });
       seedTs = seed.ts;
     } catch (err) {
@@ -273,7 +274,7 @@ export class SlackAdapter {
     }
     await respond({
       response_type: 'ephemeral',
-      text: `Running \`${kind === 'archon' ? raw : `${workflowPrefix}${raw}`}\` — see thread for output.`,
+      text: `Running \`${kind === 'archon' ? escapeSlackText(raw) : `${workflowPrefix}${escapeSlackText(raw)}`}\` — see thread for output.`,
     });
     await this.receive({
       channel: command.channel_id,

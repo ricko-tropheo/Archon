@@ -3,6 +3,9 @@ import { descriptor } from './descriptor';
 
 import {
   buildApprovalBlocks,
+  buildAttentionNoticeBlocks,
+  buildClosedApprovalBlocks,
+  buildSettledNoticeBlocks,
   parseApprovalValue,
   buildApprovalResolutionBlocks,
   buildStatusBlocks,
@@ -415,4 +418,62 @@ test('approval and recovery hints follow the descriptor prefix', () => {
   } finally {
     descriptor.workflowCommand.prefix = original;
   }
+});
+
+describe('Slack entity escaping', () => {
+  test('status cards escape node names, errors, and failure reasons', () => {
+    const { blocks } = buildStatusBlocks(
+      {
+        runId: 'run',
+        workflowName: 'assist',
+        startedAt: 0,
+        status: 'failed',
+        failureReason: '<!everyone> because',
+        nodes: [
+          { nodeId: 'plan', nodeName: '<!here>plan', state: 'failed', error: '<!channel> boom' },
+        ],
+      },
+      1
+    );
+    const text = JSON.stringify(blocks);
+    expect(text).toContain('&lt;!here&gt;plan');
+    expect(text).toContain('&lt;!channel&gt; boom');
+    expect(text).toContain('&lt;!everyone&gt; because');
+    expect(text).not.toContain('<!here>');
+    expect(text).not.toContain('<!channel>');
+  });
+
+  test('approval and closed-approval messages are escaped', () => {
+    const approval = buildApprovalBlocks({
+      runId: 'run',
+      nodeId: 'gate',
+      message: '<!channel> review this',
+      decisions: [{ id: 'approve' }],
+    });
+    expect(JSON.stringify(approval.blocks)).toContain('&lt;!channel&gt; review this');
+    const closed = buildClosedApprovalBlocks({
+      runId: 'run',
+      terminalStatus: 'completed',
+      originalMessage: '<!here> closed',
+    });
+    expect(JSON.stringify(closed.blocks)).toContain('&lt;!here&gt; closed');
+  });
+
+  test('attention and settled notices are escaped', () => {
+    const notice = {
+      type: 'gate' as const,
+      runId: 'run',
+      workflowName: 'assist',
+      nodeId: 'gate',
+      pauseId: 'pause',
+      message: '<!channel> choose',
+      gateType: 'approval' as const,
+      decisions: [{ id: 'approve' }],
+    };
+    expect(JSON.stringify(buildAttentionNoticeBlocks(notice).blocks)).toContain(
+      '&lt;!channel&gt; choose'
+    );
+    const settled = buildSettledNoticeBlocks(undefined, 'run', '<!here> done');
+    expect(JSON.stringify(settled.blocks)).toContain('&lt;!here&gt; done');
+  });
 });

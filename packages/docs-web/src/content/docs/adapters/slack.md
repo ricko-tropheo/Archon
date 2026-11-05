@@ -97,7 +97,10 @@ Socket Mode connection -- no public URL needed.
 Register `/archon` for conversation and `/archon-workflow` for direct workflow
 control. `/workflow` is the short alias: it works in mentions and direct
 messages without app registration, and it works as a slash command when you
-also register it below. Every control works without the bot mention.
+also register it below. In direct messages controls need no bot mention; in a
+channel use a registered slash command or mention the bot. Slack drops a bare
+unregistered `/workflow …` in a channel, so the fallbacks below use the
+registered `/archon-workflow`.
 
 | Command | What it does |
 | --- | --- |
@@ -107,9 +110,11 @@ also register it below. Every control works without the bot mention.
 
 ### One control surface
 
-Use the button when it is present; the command is the fallback. The bot mention
-is optional. `/workflow` and `/archon-workflow` execute identically once both
-are registered (or when `/workflow` is sent in a mention/DM).
+Use the button when it is present; the command is the fallback. In direct
+messages the bot mention is optional; in channels use a registered slash
+command or mention the bot. `/workflow` and `/archon-workflow` execute
+identically once both are registered (or when `/workflow` is sent in a
+mention/DM).
 
 | Situation | Primary action | Fallback command |
 | --- | --- | --- |

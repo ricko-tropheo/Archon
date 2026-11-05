@@ -191,6 +191,16 @@ test('the /workflow alias echoes the invoked name', async () => {
   ]);
 });
 
+test('slash seed escapes entity syntax from the command text', async () => {
+  await start();
+  await slash('run <!channel> <@U999>', '/archon-workflow');
+  const seed = (slack.posts[0] as { text?: string } | undefined)?.text ?? '';
+  expect(seed).toContain('&lt;!channel&gt;');
+  expect(seed).toContain('&lt;@U999&gt;');
+  expect(seed).not.toContain('<!channel>');
+  expect(seed).not.toContain('<@U999>');
+});
+
 test('ordinary slash commands use the same inbound flow', async () => {
   await start();
   await slash('hello');

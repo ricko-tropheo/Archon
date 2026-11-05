@@ -7,6 +7,7 @@ import {
 } from '@archon/chat-contract';
 import type { types } from '@slack/bolt';
 import { descriptor } from './descriptor';
+import { escapeSlackText } from './text';
 
 type TerminalEvent = Extract<ChatRunEvent, { type: 'terminal' }>;
 type ApprovalEvent = Extract<ChatRunEvent, { type: 'approval_pending' }>;
@@ -147,7 +148,7 @@ export function buildApprovalBlocks(input: {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `:pause_button: *Approval needed* — run \`${shortRunId(input.runId)}\`\n\n${input.message}`,
+        text: `:pause_button: *Approval needed* — run \`${shortRunId(input.runId)}\`\n\n${escapedTruncate(input.message, 2900)}`,
       },
     },
   ];
@@ -178,7 +179,7 @@ export function buildApprovalBlocks(input: {
   });
   return {
     blocks: controlsFit ? blocks : [],
-    fallbackText: `Approval needed for run ${shortRunId(input.runId)}\n${input.message}\n${choices.join('\n')}`,
+    fallbackText: `Approval needed for run ${shortRunId(input.runId)}\n${truncate(escapeSlackText(input.message), 3000)}\n${choices.join('\n')}`,
   };
 }
 
@@ -227,7 +228,7 @@ export function buildClosedApprovalBlocks(input: {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `${TERMINAL_HEADER[input.terminalStatus]} — approval closed for run \`${shortRunId(input.runId)}\`\n\n${input.originalMessage}`,
+        text: `${TERMINAL_HEADER[input.terminalStatus]} — approval closed for run \`${shortRunId(input.runId)}\`\n\n${escapedTruncate(input.originalMessage, 2900)}`,
       },
     },
   ];
@@ -269,8 +270,9 @@ export function buildStatusBlocks(
         n.state === 'completed' && typeof n.durationMs === 'number'
           ? ` · ${formatElapsed(n.durationMs)}`
           : '';
-      const errSuffix = n.state === 'failed' && n.error ? ` — ${truncate(n.error, 120)}` : '';
-      return `${glyph} \`${n.nodeName}\`${duration}${errSuffix}`;
+      const errSuffix =
+        n.state === 'failed' && n.error ? ` — ${escapedTruncate(n.error, 120)}` : '';
+      return `${glyph} \`${escapeSlackText(n.nodeName)}\`${duration}${errSuffix}`;
     });
     blocks.push({
       type: 'section',
@@ -335,7 +337,7 @@ function buildStatusHeader(snapshot: RunSnapshot, header: string, elapsed: strin
     type: 'section',
     text: {
       type: 'mrkdwn',
-      text: `${header}${runFacts}\n*Workflow:* \`${snapshot.workflowName}\` · *Run:* \`${shortRunId(snapshot.runId)}\` · *Elapsed:* ${elapsed}`,
+      text: `${header}${runFacts}\n*Workflow:* \`${escapeSlackText(snapshot.workflowName)}\` · *Run:* \`${shortRunId(snapshot.runId)}\` · *Elapsed:* ${elapsed}`,
     },
   };
 }
@@ -349,7 +351,7 @@ function buildStatusFooter(
     footerParts.push(`total cost: $${snapshot.totalCostUsd.toFixed(4)}`);
   }
   if ((snapshot.status === 'failed' || snapshot.status === 'cancelled') && snapshot.failureReason) {
-    footerParts.push(`reason: ${truncate(snapshot.failureReason, 200)}`);
+    footerParts.push(`reason: ${escapedTruncate(snapshot.failureReason, 200)}`);
   }
   if (footerParts.length > 0) {
     return {
@@ -367,10 +369,10 @@ function statusFallbackText(
 ): string {
   return `${
     terminalStatus
-      ? `${TERMINAL_HEADER[terminalStatus]} (${snapshot.workflowName})`
+      ? `${TERMINAL_HEADER[terminalStatus]} (${escapeSlackText(snapshot.workflowName)})`
       : snapshot.status === 'paused'
-        ? `Workflow ${snapshot.workflowName} paused`
-        : `Workflow ${snapshot.workflowName} running`
+        ? `Workflow ${escapeSlackText(snapshot.workflowName)} paused`
+        : `Workflow ${escapeSlackText(snapshot.workflowName)} running`
   }${
     snapshot.authoredOutcome
       ? ` · authored outcome: ${snapshot.authoredOutcome === 'unavailable' ? 'unavailable — failed to read persisted run' : snapshot.authoredOutcome}`
@@ -514,7 +516,7 @@ function noticeIntro(notice: OpenNotice, header: string): KnownBlock {
   // Slack rejects section text over 3000 characters.
   return {
     type: 'section',
-    text: { type: 'mrkdwn', text: truncate(`${header}\n\n${notice.message}`, 3000) },
+    text: { type: 'mrkdwn', text: escapedTruncate(`${header}\n\n${notice.message}`, 3000) },
   };
 }
 
@@ -540,7 +542,7 @@ export function buildAttentionNoticeBlocks(notice: OpenNotice): {
       ]),
     ],
     fallbackText: truncate(
-      `${notice.workflowName} needs attention (run ${shortRunId(notice.runId)}): ${notice.message}`,
+      `${escapeSlackText(notice.workflowName)} needs attention (run ${shortRunId(notice.runId)}): ${truncate(escapeSlackText(notice.message), 3000)}`,
       300
     ),
   };
@@ -557,7 +559,10 @@ export function buildSettledNoticeBlocks(
     blocks: [
       notice
         ? noticeIntro(notice, `${outcome} — ${header}`)
-        : { type: 'section', text: { type: 'mrkdwn', text: `${outcome} — ${header}` } },
+        : {
+            type: 'section',
+            text: { type: 'mrkdwn', text: escapeSlackText(`${outcome} — ${header}`) },
+          },
     ],
     fallbackText: `${outcome} — run ${shortRunId(runId)}`,
   };
@@ -577,7 +582,10 @@ export function buildNoticeTerminalBlocks(notice: TerminalNotice): {
   const blocks: KnownBlock[] = [
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: `${TERMINAL_HEADER[notice.status]} — ${noticeHeader(notice)}` },
+      text: {
+        type: 'mrkdwn',
+        text: escapeSlackText(`${TERMINAL_HEADER[notice.status]} — ${noticeHeader(notice)}`),
+      },
     },
   ];
   if (facts.length > 0)
@@ -587,7 +595,7 @@ export function buildNoticeTerminalBlocks(notice: TerminalNotice): {
     });
   return {
     blocks,
-    fallbackText: `${TERMINAL_HEADER[notice.status]} (${notice.workflowName})`,
+    fallbackText: `${TERMINAL_HEADER[notice.status]} (${escapeSlackText(notice.workflowName)})`,
   };
 }
 
@@ -609,6 +617,10 @@ export function buildComposeView(metadata: string): types.ModalView {
       },
     ],
   };
+}
+
+function escapedTruncate(s: string, max: number): string {
+  return truncate(escapeSlackText(s), max);
 }
 
 function truncate(s: string, max: number): string {
