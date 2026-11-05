@@ -371,6 +371,7 @@
     "src/chat-host/attention-route.integration.test.ts": 1.1,
     "src/chat-host/inbound.test.ts": 0.9,
     "src/chat-host/platform.test.ts": 0.2,
+    "src/chat-host/progress-relay.test.ts": 0.3,
     "src/chat-host/run-events.test.ts": 0.7,
     "src/chat-host/runtime.test.ts": 0.9,
     "src/chat-host/supervisor.test.ts": 6.1,
