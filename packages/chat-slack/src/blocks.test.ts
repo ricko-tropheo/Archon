@@ -473,6 +473,42 @@ describe('Slack entity escaping', () => {
     expect(resolvedText).toContain('<@U123ALICE>');
   });
 
+  test('approval resolution stays under the Slack section limit', () => {
+    const { blocks } = buildApprovalResolutionBlocks({
+      runId: 'run',
+      nodeId: 'gate',
+      decision: 'approve',
+      actorUserId: 'U123ALICE',
+      originalMessage: 'x'.repeat(2900),
+      outcomeNote: 'y'.repeat(500),
+    });
+    const text = (blocks[0] as { text: { text: string } }).text.text;
+    expect(text.length).toBeLessThanOrEqual(3000);
+    expect(text).toContain('Approved');
+  });
+
+  test('notice headers escape the workflow name and keep the actor mention', () => {
+    const notice = {
+      type: 'gate' as const,
+      runId: 'run',
+      workflowName: '<!here>assist',
+      nodeId: 'gate',
+      pauseId: 'pause',
+      message: 'Choose',
+      gateType: 'approval' as const,
+      decisions: [{ id: 'approve' }],
+    };
+    const attentionText = JSON.stringify(buildAttentionNoticeBlocks(notice).blocks);
+    expect(attentionText).toContain('&lt;!here&gt;assist');
+    expect(attentionText).not.toContain('<!here>');
+
+    const settledText = JSON.stringify(
+      buildSettledNoticeBlocks(notice, 'run', 'Done', 'U123ALICE').blocks
+    );
+    expect(settledText).toContain('&lt;!here&gt;assist');
+    expect(settledText).toContain('<@U123ALICE>');
+  });
+
   test('attention and settled notices are escaped', () => {
     const notice = {
       type: 'gate' as const,

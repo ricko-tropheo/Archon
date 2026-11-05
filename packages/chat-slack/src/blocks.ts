@@ -209,7 +209,9 @@ export function buildApprovalResolutionBlocks(input: {
   const blocks: KnownBlock[] = [
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: lines.join('\n') },
+      // Slack rejects section text over 3000 characters; the note and decision
+      // are unbounded, so cap the joined text rather than only the message.
+      text: { type: 'mrkdwn', text: truncate(lines.join('\n'), 3000) },
     },
   ];
   return {
@@ -329,7 +331,7 @@ function buildStatusHeader(snapshot: RunSnapshot, header: string, elapsed: strin
       ? 'unavailable — failed to read persisted run'
       : snapshot.authoredOutcome === undefined
         ? undefined
-        : `\`${snapshot.authoredOutcome}\``;
+        : `\`${escapeSlackText(snapshot.authoredOutcome)}\``;
   const runFacts = authoredOutcomeLabel
     ? `\n*Execution status:* \`${snapshot.status}\` · *Authored outcome:* ${authoredOutcomeLabel}`
     : '';
@@ -375,7 +377,7 @@ function statusFallbackText(
         : `Workflow ${escapeSlackText(snapshot.workflowName)} running`
   }${
     snapshot.authoredOutcome
-      ? ` · authored outcome: ${snapshot.authoredOutcome === 'unavailable' ? 'unavailable — failed to read persisted run' : snapshot.authoredOutcome}`
+      ? ` · authored outcome: ${snapshot.authoredOutcome === 'unavailable' ? 'unavailable — failed to read persisted run' : escapeSlackText(snapshot.authoredOutcome)}`
       : ''
   }${approvalRecovery ? ` · ${approvalRecovery}` : ''}`;
 }
@@ -512,21 +514,43 @@ function noticeControls(notice: OpenNotice): KnownBlock[] | undefined {
   }
 }
 
-function noticeIntro(notice: OpenNotice, header: string): KnownBlock {
-  // Slack rejects section text over 3000 characters. The caller escapes any
-  // untrusted text in the header so trusted entities such as an actor mention
-  // survive; the notice message is always escaped here.
+type NoticeIntroSegment = { text: string; trusted?: boolean };
+
+function trustedNoticeText(text: string): NoticeIntroSegment {
+  return { text, trusted: true };
+}
+
+function authoredNoticeText(text: string): NoticeIntroSegment {
+  return { text };
+}
+
+function renderNoticeSegments(segments: readonly NoticeIntroSegment[]): string {
+  // Only explicitly trusted segments bypass escaping, so a new caller cannot
+  // reintroduce injection by composing a header from raw text.
+  return segments
+    .map(segment => (segment.trusted === true ? segment.text : escapeSlackText(segment.text)))
+    .join('');
+}
+
+function noticeHeaderSegments(notice: OpenNotice | TerminalNotice): NoticeIntroSegment[] {
+  return [
+    trustedNoticeText('*'),
+    authoredNoticeText(notice.workflowName),
+    trustedNoticeText(`* · run \`${shortRunId(notice.runId)}\``),
+  ];
+}
+
+function noticeIntro(notice: OpenNotice, header: readonly NoticeIntroSegment[]): KnownBlock {
+  // Slack rejects section text over 3000 characters. Header segments are
+  // escaped by renderNoticeSegments except for the trusted ones; the notice
+  // message is always escaped here.
   return {
     type: 'section',
     text: {
       type: 'mrkdwn',
-      text: truncate(`${header}\n\n${escapeSlackText(notice.message)}`, 3000),
+      text: truncate(`${renderNoticeSegments(header)}\n\n${escapeSlackText(notice.message)}`, 3000),
     },
   };
-}
-
-function noticeHeader(notice: OpenNotice | TerminalNotice): string {
-  return `*${escapeSlackText(notice.workflowName)}* · run \`${shortRunId(notice.runId)}\``;
 }
 
 export function buildAttentionNoticeBlocks(notice: OpenNotice): {
@@ -536,7 +560,10 @@ export function buildAttentionNoticeBlocks(notice: OpenNotice): {
   const controls = noticeControls(notice);
   return {
     blocks: [
-      noticeIntro(notice, `:bell: Needs attention — ${noticeHeader(notice)}`),
+      noticeIntro(notice, [
+        trustedNoticeText(':bell: Needs attention — '),
+        ...noticeHeaderSegments(notice),
+      ]),
       ...(controls ?? [
         {
           type: 'context',
@@ -561,23 +588,34 @@ export function buildSettledNoticeBlocks(
   actorUserId?: string,
   note?: string
 ): { blocks: KnownBlock[]; fallbackText: string } {
-  const header = notice ? noticeHeader(notice) : `run \`${shortRunId(runId)}\``;
-  // The outcome and note are model-authored and must be escaped, but the actor
-  // is a trusted Slack mention. Splice it in after escaping so Slack renders
-  // the display name instead of the literal user ID.
-  const settled = `${escapeSlackText(outcome)}${
-    actorUserId ? ` by <@${actorUserId}>` : ''
-  }${note ? ` (${escapeSlackText(note)})` : ''}`;
+  const settledSegments: NoticeIntroSegment[] = [
+    authoredNoticeText(outcome),
+    ...(actorUserId ? [trustedNoticeText(` by <@${actorUserId}>`)] : []),
+    ...(note ? [authoredNoticeText(` (${note})`)] : []),
+  ];
+  const headerSegments: NoticeIntroSegment[] = notice
+    ? noticeHeaderSegments(notice)
+    : [trustedNoticeText(`run \`${shortRunId(runId)}\``)];
   return {
     blocks: [
       notice
-        ? noticeIntro(notice, `${settled} — ${header}`)
+        ? noticeIntro(notice, [...settledSegments, trustedNoticeText(' — '), ...headerSegments])
         : {
             type: 'section',
-            text: { type: 'mrkdwn', text: `${settled} — ${header}` },
+            text: {
+              type: 'mrkdwn',
+              text: renderNoticeSegments([
+                ...settledSegments,
+                trustedNoticeText(' — '),
+                ...headerSegments,
+              ]),
+            },
           },
     ],
-    fallbackText: `${settled} — run ${shortRunId(runId)}`,
+    fallbackText: renderNoticeSegments([
+      ...settledSegments,
+      trustedNoticeText(` — run ${shortRunId(runId)}`),
+    ]),
   };
 }
 
@@ -588,7 +626,7 @@ export function buildNoticeTerminalBlocks(notice: TerminalNotice): {
   const facts: string[] = [];
   if (notice.authoredOutcome)
     facts.push(
-      `authored outcome: ${notice.authoredOutcome === 'unavailable' ? 'unavailable — failed to read persisted run' : notice.authoredOutcome}`
+      `authored outcome: ${notice.authoredOutcome === 'unavailable' ? 'unavailable — failed to read persisted run' : escapeSlackText(notice.authoredOutcome)}`
     );
   if (notice.totalCostUsd !== undefined)
     facts.push(`total cost: $${notice.totalCostUsd.toFixed(4)}`);
@@ -597,7 +635,10 @@ export function buildNoticeTerminalBlocks(notice: TerminalNotice): {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `${TERMINAL_HEADER[notice.status]} — ${noticeHeader(notice)}`,
+        text: renderNoticeSegments([
+          trustedNoticeText(`${TERMINAL_HEADER[notice.status]} — `),
+          ...noticeHeaderSegments(notice),
+        ]),
       },
     },
   ];
