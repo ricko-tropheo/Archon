@@ -46,7 +46,7 @@ async function slash(text: string, kind = '/archon'): Promise<string[]> {
   if (!handler) throw new Error('missing command');
   // Bolt supplies more fields; this fixture selects the ones the handler reads.
   await handler({
-    command: { text, user_id: 'U1', channel_id: 'C1' } as SlashCommand,
+    command: { text, command: kind, user_id: 'U1', channel_id: 'C1' } as SlashCommand,
     ack: async () => {},
     respond: async (value: { text?: string } | string) => {
       notes.push(typeof value === 'string' ? value : (value.text ?? ''));
@@ -184,6 +184,13 @@ test('/workflow and /archon-workflow execute the same control path', async () =>
     '/workflow resume 33d9ac68',
   ]);
 });
+test('the /workflow alias echoes the invoked name', async () => {
+  await start();
+  expect(await slash('run assist', '/workflow')).toEqual([
+    'Running `/workflow run assist` — see thread for output.',
+  ]);
+});
+
 test('ordinary slash commands use the same inbound flow', async () => {
   await start();
   await slash('hello');

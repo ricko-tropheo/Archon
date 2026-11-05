@@ -230,13 +230,16 @@ export class SlackAdapter {
     kind: 'archon' | 'workflow'
   ): Promise<void> {
     const raw = command.text.trim();
+    // Echo the name the operator actually invoked; `/workflow` is an alias of
+    // the plugin prefix and should not be reported back as a different command.
+    const workflowPrefix = `${command.command ?? descriptor.workflowCommand.prefix.trimEnd()} `;
     if (!raw) {
       await respond({
         response_type: 'ephemeral',
         text:
           kind === 'archon'
             ? 'Usage: `/archon <message>` — talk to Archon in this channel.'
-            : `Usage: \`${descriptor.workflowCommand.prefix}<subcommand>\` — e.g. \`list\`, \`status\`, \`get <id>\`, \`run <name> <args>\`, \`approve <id>\`, \`reject <id> <reason>\`, \`abandon <id>\`.`,
+            : `Usage: \`${workflowPrefix}<subcommand>\` — e.g. \`list\`, \`status\`, \`get <id>\`, \`run <name> <args>\`, \`approve <id>\`, \`reject <id> <reason>\`, \`abandon <id>\`.`,
       });
       return;
     }
@@ -255,7 +258,7 @@ export class SlackAdapter {
         text:
           kind === 'archon'
             ? `<@${command.user_id}> via /archon: ${raw}`
-            : `<@${command.user_id}> ran \`${descriptor.workflowCommand.prefix}${raw}\``,
+            : `<@${command.user_id}> ran \`${workflowPrefix}${raw}\``,
       });
       seedTs = seed.ts;
     } catch (err) {
@@ -270,7 +273,7 @@ export class SlackAdapter {
     }
     await respond({
       response_type: 'ephemeral',
-      text: `Running \`${kind === 'archon' ? raw : `${descriptor.workflowCommand.prefix}${raw}`}\` — see thread for output.`,
+      text: `Running \`${kind === 'archon' ? raw : `${workflowPrefix}${raw}`}\` — see thread for output.`,
     });
     await this.receive({
       channel: command.channel_id,

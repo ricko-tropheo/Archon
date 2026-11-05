@@ -18,6 +18,7 @@ import {
 } from './blocks';
 import { SlackAdapter, splitConversationId, type SlackMessageRef } from './adapter';
 import { logFailure } from './log';
+import { escapeSlackText } from './text';
 
 interface ApprovalMessage {
   message: string;
@@ -193,7 +194,7 @@ export class SlackWorkflowBridge {
       await this.adapter.getApp().client.chat.postMessage({
         channel: state.channel,
         thread_ts: state.threadTs,
-        text: `:hourglass_flowing_sand: *${event.nodeName}*\n${event.progress}`,
+        text: `:hourglass_flowing_sand: *${escapeSlackText(event.nodeName)}*\n${escapeSlackText(event.progress)}`,
       });
     } catch (error) {
       logFailure('slack.bridge_progress_post_failed', error);

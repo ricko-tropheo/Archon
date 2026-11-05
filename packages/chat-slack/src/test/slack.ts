@@ -123,10 +123,10 @@ export class StubSlack {
   error(): void {}
   async start(): Promise<void> {
     if (
-      this.events.size < 2 ||
-      this.commands.size < 2 ||
-      this.actions.length < 3 ||
-      this.views.size < 1
+      this.events.size !== 2 ||
+      this.commands.size !== 3 ||
+      this.actions.length !== 5 ||
+      this.views.size !== 1
     )
       throw new Error('handlers must register before start');
     this.started = true;

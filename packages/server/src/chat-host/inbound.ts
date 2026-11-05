@@ -268,7 +268,7 @@ export function registerChatInbound(
           status: 'done',
           result: {
             kind: 'abandoned',
-            cancelled: true,
+            cancelled: result.cancelled,
             cleanupWarnings: result.cleanupWarnings,
             cascadeFailures: result.cascadeFailures,
             blockedParentRunId: result.blockedParentRunId,

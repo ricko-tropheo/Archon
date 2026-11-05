@@ -206,6 +206,23 @@ test('abandon releases a failed run; another member is forbidden', async () => {
   expect((await getWorkflowRun(started.id))?.status).toBe('cancelled');
 });
 
+test('admins can abandon a run they did not start', async () => {
+  const started = await run();
+  await getDatabase().query(
+    "UPDATE remote_agent_workflow_runs SET status = 'failed' WHERE id = $1",
+    [started.id]
+  );
+  const admin = await findOrCreateUserByPlatformIdentity(descriptor.id, 'admin');
+  await setUserRole(admin.id, 'admin');
+  expect(
+    await action({ runId: started.id, action: 'abandon', sender: { platformUserId: 'admin' } })
+  ).toMatchObject({
+    status: 'done',
+    result: { kind: 'abandoned', cancelled: true },
+  });
+  expect((await getWorkflowRun(started.id))?.status).toBe('cancelled');
+});
+
 test('approve and declared response preserve gate occurrence and resume with host identity', async () => {
   const paused = await run(true);
   expect(

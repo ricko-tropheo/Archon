@@ -132,6 +132,25 @@ test('live agent progress posts one node-labelled excerpt', async () => {
   expect(slack.updates).toHaveLength(0);
 });
 
+test('progress escapes Slack entity syntax from agent output', async () => {
+  await started();
+  await plugin.onRunEvent({
+    type: 'node_state',
+    runId: 'run',
+    nodeId: 'plan',
+    nodeName: '<!here>plan',
+    state: 'running',
+    progress: '<!channel> <@U123> & draft',
+  });
+  const text = (slack.posts.at(-1) as { text?: string }).text ?? '';
+  expect(text).toContain('&lt;!here&gt;plan');
+  expect(text).toContain('&lt;!channel&gt;');
+  expect(text).toContain('&lt;@U123&gt;');
+  expect(text).toContain('&amp; draft');
+  expect(text).not.toContain('<!channel>');
+  expect(text).not.toContain('<@U123>');
+});
+
 test('a failed terminal card offers Resume and Abandon and Resume executes', async () => {
   await started();
   await plugin.onRunEvent({ type: 'terminal', runId: 'run', status: 'failed', error: 'boom' });
