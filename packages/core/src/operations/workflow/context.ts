@@ -1,3 +1,4 @@
+import type { WorkflowDeps } from '@archon/workflows/deps';
 import { createLogger } from '@archon/paths';
 import { processGroupHasLiveMembers as realProcessGroupHasLiveMembers } from '@archon/paths/process-start-identity';
 import type { WorkflowRun } from '@archon/workflows/schemas/workflow-run';
@@ -54,6 +55,7 @@ export interface WorkflowOperationsDeps {
   reclaimRunWorktree: typeof ReclaimRunWorktree;
   /** Test seam for proving a dead owner's process group has no survivors. */
   processGroupHasLiveMembers?: (pgid: number) => Promise<boolean>;
+  releaseRunResources?: WorkflowDeps['releaseRunResources'];
 }
 
 /** The supplied effects plus the lookup and authorization every operation starts with. */
@@ -111,4 +113,13 @@ export function createOperationContext(deps: WorkflowOperationsDeps): OperationC
     assertMayAct,
     getRunOrThrow,
   };
+}
+
+export async function releaseRunResources(ctx: OperationContext, runId: string): Promise<string[]> {
+  try {
+    return (await ctx.releaseRunResources?.(runId)) ?? [];
+  } catch (err) {
+    getLog().warn({ err, runId }, 'operations.resource_release_failed');
+    return [`Run ${runId} retained verification images: ${String(err)}`];
+  }
 }

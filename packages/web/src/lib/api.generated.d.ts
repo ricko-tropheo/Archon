@@ -3260,6 +3260,8 @@ export interface paths {
           codebaseId?: string;
           /** @description An ISO date or time. Each group also reports records whose producing runs started before it against those started at or after it. */
           compare?: string;
+          /** @description A node id. Each group also reports its records split by the model label that ran this node in their producing runs and the runs below them. Not combined with `compare`; a node no producing run ran is a 400 listing the AI nodes they ran. */
+          byModel?: string;
         };
         header?: never;
         path?: never;
@@ -3276,7 +3278,7 @@ export interface paths {
             'application/json': components['schemas']['MetricsReport'];
           };
         };
-        /** @description Malformed window or compare cut */
+        /** @description Malformed window or compare cut, compare with byModel, or a byModel node no producing run ran */
         400: {
           headers: {
             [name: string]: unknown;
@@ -3676,6 +3678,74 @@ export interface paths {
           };
           content: {
             'application/json': components['schemas']['ConfigResponse'];
+          };
+        };
+        /** @description Server error */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/codebases/{id}/config': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get a project's merged configuration (safe subset)
+     * @description Defaults, ~/.archon/config.yaml and the project's .archon/config.yaml, merged and with secrets removed. `envKeys` names the keys of the `env:` block; values are never returned.
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The project's merged configuration */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['ProjectConfigResponse'];
+          };
+        };
+        /** @description Codebase not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description The global or project config file is invalid */
+        422: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
           };
         };
         /** @description Server error */
@@ -7299,8 +7369,10 @@ export interface components {
         unit: string;
         calibrates: string | null;
         headline_instrument: string | null;
+        headline_measured_by: string[];
         instruments: {
           instrument: string | null;
+          measured_by: string[];
           value: number;
           n: number;
           interval: {
@@ -7314,6 +7386,7 @@ export interface components {
             runs: number;
             runs_without_cost: number;
             runs_without_tokens: number;
+            runs_partial_cost: number;
             runs_missing: number;
           };
           compare?: {
@@ -7341,6 +7414,97 @@ export interface components {
             } | null;
             separated: boolean;
             straddling: number;
+            unattributed: number;
+          };
+          by_model?: {
+            node: string;
+            groups: (
+              | {
+                  /** @enum {string} */
+                  split: 'model';
+                  label: string;
+                  value: number;
+                  n: number;
+                  interval: {
+                    low: number;
+                    high: number;
+                  } | null;
+                  cost: {
+                    usd: number | null;
+                    input_tokens: number | null;
+                    output_tokens: number | null;
+                    runs: number;
+                    runs_without_cost: number;
+                    runs_without_tokens: number;
+                    runs_partial_cost: number;
+                    runs_missing: number;
+                  };
+                  requested_models: string[];
+                  resolved_models: string[];
+                  delta_vs_rest: number | null;
+                  delta_interval_vs_rest: {
+                    low: number;
+                    high: number;
+                  } | null;
+                  separated: boolean;
+                }
+              | {
+                  /** @enum {string} */
+                  split: 'mixed';
+                  value: number;
+                  n: number;
+                  interval: {
+                    low: number;
+                    high: number;
+                  } | null;
+                  cost: {
+                    usd: number | null;
+                    input_tokens: number | null;
+                    output_tokens: number | null;
+                    runs: number;
+                    runs_without_cost: number;
+                    runs_without_tokens: number;
+                    runs_partial_cost: number;
+                    runs_missing: number;
+                  };
+                  requested_models: string[];
+                  resolved_models: string[];
+                  delta_vs_rest: number | null;
+                  delta_interval_vs_rest: {
+                    low: number;
+                    high: number;
+                  } | null;
+                  separated: boolean;
+                }
+              | {
+                  /** @enum {string} */
+                  split: 'none';
+                  value: number;
+                  n: number;
+                  interval: {
+                    low: number;
+                    high: number;
+                  } | null;
+                  cost: {
+                    usd: number | null;
+                    input_tokens: number | null;
+                    output_tokens: number | null;
+                    runs: number;
+                    runs_without_cost: number;
+                    runs_without_tokens: number;
+                    runs_partial_cost: number;
+                    runs_missing: number;
+                  };
+                  requested_models: string[];
+                  resolved_models: string[];
+                  delta_vs_rest: number | null;
+                  delta_interval_vs_rest: {
+                    low: number;
+                    high: number;
+                  } | null;
+                  separated: boolean;
+                }
+            )[];
             unattributed: number;
           };
           latest: {
@@ -7462,6 +7626,10 @@ export interface components {
       small?: components['schemas']['TierEntry'];
       medium?: components['schemas']['TierEntry'];
       large?: components['schemas']['TierEntry'];
+    };
+    ProjectConfigResponse: {
+      config: components['schemas']['SafeConfig'];
+      envKeys: string[];
     };
     UpdateAssistantConfigBody: {
       assistant?: string;

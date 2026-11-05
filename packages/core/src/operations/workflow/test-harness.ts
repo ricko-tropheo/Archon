@@ -61,6 +61,10 @@ export const mockDeleteWorkflowNodeSessions = mock<IWorkflowStore['deleteWorkflo
   () => Promise.resolve({ deleted: 0 })
 );
 
+export const mockReleaseRunResources = mock<(runId: string) => Promise<void>>(
+  async () => undefined
+);
+
 export const mockReclaimContainerEnv = mock<WorkflowOperationsDeps['reclaimContainerEnv']>(() =>
   Promise.resolve()
 );
@@ -196,6 +200,7 @@ export const {
   isRunOwnerAnswering,
   reclaimRunWorktree: async () => ({ warnings: [] }),
   reclaimContainerEnv: mockReclaimContainerEnv,
+  releaseRunResources: mockReleaseRunResources,
 });
 
 // ---------------------------------------------------------------------------

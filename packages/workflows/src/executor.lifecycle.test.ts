@@ -1,6 +1,7 @@
 // @archon-test-isolated
 import {
   dagCall,
+  containerBackend,
   makeDeps,
   makeRun,
   makeStore,
@@ -27,6 +28,7 @@ import * as source from './run-source';
 import { liveSourceRoots } from './workflow-source';
 import { hydrateResumableRun } from './run-resume';
 import { noExecutorCanWrite } from './run-scratch';
+import type { ReleaseVerificationImages } from './deps';
 import type { ContainerPauseReceipt } from './dag/pause';
 import type { WorkflowRunNodeSession } from './schemas';
 import type { DagResumeSnapshot, IWorkflowStore } from './store';
@@ -687,8 +689,13 @@ describe('scratch on exit', () => {
         getWorkflowRunStatus: mock(async () => status),
       });
 
-      await startWorkflow({ store });
+      const releaseRunResources = mock(async (id: string) => {
+        expect(id).toBe(run.id);
+        expect(noExecutorCanWrite(run)).toBe(ownerPid === process.pid);
+      });
+      await startWorkflow({ deps: { ...makeDeps(store), releaseRunResources } });
 
+      expect(releaseRunResources).toHaveBeenCalledTimes(status === 'paused' ? 0 : 1);
       expect(existsSync(checkout)).toBe(kept);
     }
   );
@@ -735,14 +742,21 @@ describe('scratch on exit', () => {
       mkdirSync(scratch, { recursive: true });
       if (failed) mockExecuteDagWorkflow.mockRejectedValueOnce(new Error('DAG failed'));
       const cleanups: (() => Promise<void>)[] = [];
+      const releaseRunResources = mock(async () => {});
       const result = await startWorkflow({
-        store: makeStore({
-          getWorkflowRun: mock(async () => run),
-          getWorkflowRunStatus: mock(async () => run.status),
-        }),
+        deps: {
+          ...makeDeps(
+            makeStore({
+              getWorkflowRun: mock(async () => run),
+              getWorkflowRunStatus: mock(async () => run.status),
+            })
+          ),
+          releaseRunResources,
+        },
         options: { deferScratchCleanup: cleanup => cleanups.push(cleanup) },
       });
       expect(result.success).toBe(!failed);
+      expect(releaseRunResources).toHaveBeenCalledWith(run.id);
       expect(cleanups).toHaveLength(1);
       expect(existsSync(scratch)).toBe(true);
       await Promise.all(cleanups.map(cleanup => cleanup()));
@@ -781,14 +795,22 @@ describe('scratch on exit', () => {
       ...run.metadata,
       [EXECUTION_OWNER_METADATA_KEY]: { host: hostname(), pid: process.pid },
     };
+    const releaseRunResources = mock(async () => undefined);
     let duringExecution: boolean | undefined;
     mockExecuteDagWorkflow.mockImplementationOnce(async () => {
       duringExecution = noExecutorCanWrite(run);
+      expect(releaseRunResources).not.toHaveBeenCalled();
       return undefined;
     });
 
-    await startWorkflow({ store: makeStore({ getWorkflowRun: mock(async () => run) }) });
+    await startWorkflow({
+      deps: {
+        ...makeDeps(makeStore({ getWorkflowRun: mock(async () => run) })),
+        releaseRunResources,
+      },
+    });
 
+    expect(releaseRunResources).toHaveBeenCalledWith(run.id);
     expect(duringExecution).toBe(false);
     expect(noExecutorCanWrite(run)).toBe(true);
   });
@@ -851,10 +873,12 @@ describe('terminal failure writes', () => {
       new TerminalStatusWriteError(new Error('terminal completion write failed'))
     );
     const failWorkflowRun = mock(async () => ({ failed: true }));
-    await expect(startWorkflow({ store: makeStore({ failWorkflowRun }) })).rejects.toThrow(
-      'terminal completion write failed'
-    );
+    const releaseRunResources = mock(async () => {});
+    await expect(
+      startWorkflow({ deps: { ...makeDeps(makeStore({ failWorkflowRun })), releaseRunResources } })
+    ).rejects.toThrow('terminal completion write failed');
     expect(failWorkflowRun).not.toHaveBeenCalled();
+    expect(releaseRunResources).not.toHaveBeenCalled();
   });
 
   it('reports a run whose row could not be created as run_not_created, with no run_ref', async () => {
@@ -873,4 +897,33 @@ describe('terminal failure writes', () => {
     });
     expect(props.runId).toBeUndefined();
   });
+});
+
+it('forwards backend image release only after executor writer shutdown', async () => {
+  const run = makeRun({ status: 'completed' });
+  run.metadata[EXECUTION_OWNER_METADATA_KEY] = { host: hostname(), pid: process.pid };
+  const store = makeStore({ getWorkflowRun: mock(async () => run) });
+  const releaseVerificationImages = mock(async function (this: unknown, _id: string, _env: string) {
+    expect(this).toBe(backend);
+  });
+  const backend = { ...containerBackend(), releaseVerificationImages };
+  const releaseRunResources = mock(async (id: string, release?: ReleaseVerificationImages) => {
+    expect(id).toBe(run.id);
+    expect(noExecutorCanWrite(run)).toBe(true);
+    expect(release).toEqual(expect.any(Function));
+    await release?.(id, 'env-owned');
+  });
+  await startWorkflow({
+    deps: { ...makeDeps(store), releaseRunResources },
+    options: {
+      execContext: { kind: 'container', containerId: 'owned-container' },
+      container: {
+        envId: 'env-owned',
+        writeBack: 'auto',
+        backend,
+      },
+    },
+  });
+  expect(releaseRunResources).toHaveBeenCalledTimes(1);
+  expect(releaseVerificationImages).toHaveBeenCalledWith(run.id, 'env-owned');
 });

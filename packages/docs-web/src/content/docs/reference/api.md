@@ -161,6 +161,7 @@ Performs a soft delete -- the conversation is hidden but not destroyed.
 | DELETE | `/api/codebases/{id}` | Delete a codebase after container cleanup |
 | GET | `/api/codebases/{id}/environments` | List isolation environments for a codebase |
 | POST | `/api/codebases/base-branch` | Inspect the remote default branch without registering a project |
+| GET | `/api/codebases/{id}/config` | Get a codebase's merged config (defaults, global and its `.archon/config.yaml`) with secrets removed; `envKeys` lists its `env:` key names only |
 | GET | `/api/codebases/{id}/env` | List a codebase's environment variable keys (values are never returned) |
 | PUT | `/api/codebases/{id}/env` | Set or update a codebase environment variable |
 | DELETE | `/api/codebases/{id}/env/{key}` | Delete a codebase environment variable |
@@ -567,11 +568,17 @@ curl 'http://localhost:3090/api/metrics?name=factory.prs_merged&since=7d'
 
 Query parameters, all optional: `since` (a duration such as `7d`, `24h` or `2w`, or an ISO
 date or time; default 30 days before `until`), `until` (an ISO date or time; default now),
-`name`, `subject`, `codebaseId` and `compare` (an ISO date or time to split each
-instrument's records at). The window is half-open. It returns the same `MetricsReport`
-`archon metrics --json` prints: per name, its definition and one entry per instrument with
+`name`, `subject`, `codebaseId`, `compare` (an ISO date or time to split each
+instrument's records at) and `byModel` (a node id to split them by the model that ran it).
+The window is half-open. It returns the same `MetricsReport` `archon metrics --json`
+prints: per name, its definition and one entry per instrument and `measured_by` with
 `value`, `n`, `interval`, `cost`, `latest` and a daily `series`, a `compare` block when
-`compare` is given, plus `refused[]`. Returns **400** for a malformed window or `compare`.
+`compare` is given or a `by_model` block when `byModel` is, plus `refused[]`. Returns
+**400** for a malformed window or `compare`, an empty `byModel`, `compare` with `byModel`, and a
+`byModel` node none of the window's existing producing runs ran, with the AI node ids they
+did run in the error. The node is not checked when no producing run still exists: a window
+with no records returns an empty report, and records whose runs were all deleted are
+`unattributed`.
 See the [metrics guide](/guides/metrics/).
 
 ---
