@@ -113,7 +113,16 @@ export async function continueResolvedGateRun(
   // the owner that is already continuing the run keep it.
   let current = run;
   try {
-    current = (await workflowDb.getWorkflowRun(run.id)) ?? run;
+    const refreshed = await workflowDb.getWorkflowRun(run.id);
+    if (!refreshed) {
+      getLog().info(
+        { conversationId, workflowRunId: run.id, workflowName: run.workflow_name, action },
+        'orchestrator.gate_continuation_run_missing'
+      );
+      await notify(`${decision}. **${run.workflow_name}** no longer exists; nothing to resume.`);
+      return;
+    }
+    current = refreshed;
   } catch (error) {
     getLog().warn(
       { err: toError(error), conversationId, workflowRunId: run.id, action },

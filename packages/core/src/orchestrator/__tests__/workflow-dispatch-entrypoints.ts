@@ -341,6 +341,26 @@ export function registerGateContinuationTests(trackTempRoot: ReturnType<typeof t
       expect(messages.some(message => message.includes('retry with'))).toBe(false);
     });
 
+    test('does not resume a run deleted after the gate decision', async () => {
+      mockGetWorkflowRunDb.mockResolvedValueOnce(null);
+      const platform = makePlatform();
+      await continueResolvedGateRun(
+        platform,
+        'conv-1',
+        makeConversation({ codebase_id: 'codebase-1' }),
+        makeCodebase(),
+        makeGateRun(),
+        'approve',
+        operator
+      );
+      expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+      const messages = (platform.sendMessage as ReturnType<typeof mock>).mock.calls.map(
+        c => (c as unknown[])[1] as string
+      );
+      expect(messages).toContain('Approved. **gated** no longer exists; nothing to resume.');
+      expect(messages.some(message => message.includes('Continuation requested'))).toBe(false);
+    });
+
     test('a running refusal during dispatch reports already-running, not retry-resume', async () => {
       const running = makeRun({ ...makeGateRun(), status: 'running' });
       // The pre-check sees a paused run; by the time the dispatch resumes it, the

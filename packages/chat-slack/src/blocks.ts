@@ -197,14 +197,14 @@ export function buildApprovalResolutionBlocks(input: {
       ? 'Approved'
       : input.decision === 'reject'
         ? 'Rejected'
-        : `Selected ${input.decision}`;
+        : `Selected ${escapeSlackText(input.decision)}`;
   const lines: string[] = [
     `${icon} *${verb}* by <@${input.actorUserId}> — run \`${shortRunId(input.runId)}\``,
     '',
-    input.originalMessage,
+    escapedTruncate(input.originalMessage, 2900),
   ];
   if (input.outcomeNote) {
-    lines.push('', `_${input.outcomeNote}_`);
+    lines.push('', `_${escapeSlackText(input.outcomeNote)}_`);
   }
   const blocks: KnownBlock[] = [
     {
@@ -513,15 +513,20 @@ function noticeControls(notice: OpenNotice): KnownBlock[] | undefined {
 }
 
 function noticeIntro(notice: OpenNotice, header: string): KnownBlock {
-  // Slack rejects section text over 3000 characters.
+  // Slack rejects section text over 3000 characters. The caller escapes any
+  // untrusted text in the header so trusted entities such as an actor mention
+  // survive; the notice message is always escaped here.
   return {
     type: 'section',
-    text: { type: 'mrkdwn', text: escapedTruncate(`${header}\n\n${notice.message}`, 3000) },
+    text: {
+      type: 'mrkdwn',
+      text: truncate(`${header}\n\n${escapeSlackText(notice.message)}`, 3000),
+    },
   };
 }
 
 function noticeHeader(notice: OpenNotice | TerminalNotice): string {
-  return `*${notice.workflowName}* · run \`${shortRunId(notice.runId)}\``;
+  return `*${escapeSlackText(notice.workflowName)}* · run \`${shortRunId(notice.runId)}\``;
 }
 
 export function buildAttentionNoticeBlocks(notice: OpenNotice): {
@@ -552,19 +557,27 @@ export function buildAttentionNoticeBlocks(notice: OpenNotice): {
 export function buildSettledNoticeBlocks(
   notice: OpenNotice | undefined,
   runId: string,
-  outcome: string
+  outcome: string,
+  actorUserId?: string,
+  note?: string
 ): { blocks: KnownBlock[]; fallbackText: string } {
   const header = notice ? noticeHeader(notice) : `run \`${shortRunId(runId)}\``;
+  // The outcome and note are model-authored and must be escaped, but the actor
+  // is a trusted Slack mention. Splice it in after escaping so Slack renders
+  // the display name instead of the literal user ID.
+  const settled = `${escapeSlackText(outcome)}${
+    actorUserId ? ` by <@${actorUserId}>` : ''
+  }${note ? ` (${escapeSlackText(note)})` : ''}`;
   return {
     blocks: [
       notice
-        ? noticeIntro(notice, `${outcome} — ${header}`)
+        ? noticeIntro(notice, `${settled} — ${header}`)
         : {
             type: 'section',
-            text: { type: 'mrkdwn', text: escapeSlackText(`${outcome} — ${header}`) },
+            text: { type: 'mrkdwn', text: `${settled} — ${header}` },
           },
     ],
-    fallbackText: `${outcome} — run ${shortRunId(runId)}`,
+    fallbackText: `${settled} — run ${shortRunId(runId)}`,
   };
 }
 
@@ -584,7 +597,7 @@ export function buildNoticeTerminalBlocks(notice: TerminalNotice): {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: escapeSlackText(`${TERMINAL_HEADER[notice.status]} — ${noticeHeader(notice)}`),
+        text: `${TERMINAL_HEADER[notice.status]} — ${noticeHeader(notice)}`,
       },
     },
   ];

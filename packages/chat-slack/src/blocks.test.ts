@@ -457,6 +457,20 @@ describe('Slack entity escaping', () => {
       originalMessage: '<!here> closed',
     });
     expect(JSON.stringify(closed.blocks)).toContain('&lt;!here&gt; closed');
+    const resolved = buildApprovalResolutionBlocks({
+      runId: 'run',
+      nodeId: 'gate',
+      decision: '<!channel>choose',
+      actorUserId: 'U123ALICE',
+      originalMessage: '<!channel> resolved',
+      outcomeNote: '<!here> note',
+    });
+    const resolvedText = JSON.stringify(resolved.blocks);
+    expect(resolvedText).toContain('Selected &lt;!channel&gt;choose');
+    expect(resolvedText).toContain('&lt;!channel&gt; resolved');
+    expect(resolvedText).toContain('&lt;!here&gt; note');
+    expect(resolvedText).not.toContain('<!channel>');
+    expect(resolvedText).toContain('<@U123ALICE>');
   });
 
   test('attention and settled notices are escaped', () => {
@@ -475,5 +489,18 @@ describe('Slack entity escaping', () => {
     );
     const settled = buildSettledNoticeBlocks(undefined, 'run', '<!here> done');
     expect(JSON.stringify(settled.blocks)).toContain('&lt;!here&gt; done');
+
+    const withActor = buildSettledNoticeBlocks(
+      notice,
+      'run',
+      '<!here> done',
+      'U123ALICE',
+      '<!channel> note'
+    );
+    const withActorText = JSON.stringify(withActor.blocks);
+    expect(withActorText).toContain('&lt;!here&gt; done');
+    expect(withActorText).toContain('&lt;!channel&gt; note');
+    expect(withActorText).toContain('<@U123ALICE>');
+    expect(withActorText).not.toContain('&lt;@U123ALICE&gt;');
   });
 });

@@ -109,6 +109,34 @@ test('a first gate on a fresh run seeds state and posts its button card', async 
   expect(posts).toContain('actions');
 });
 
+test('a gate-seeded state keeps its approval card when workflow_started retries the status post', async () => {
+  slack.failPost = new Error('status post failed');
+  await plugin.onRunEvent({
+    type: 'approval_pending',
+    runId: 'fresh',
+    nodeId: 'review',
+    pauseId: 'pause',
+    message: 'Ship?',
+    decisions: [{ id: 'ship', label: 'Ship it' }],
+    conversationId: 'C1:1',
+    workflowName: 'assist',
+  });
+  // The seeded status post failed; the approval card succeeded as the first post.
+  expect(slack.posts).toHaveLength(1);
+
+  await plugin.onRunEvent({
+    type: 'workflow_started',
+    runId: 'fresh',
+    workflowName: 'assist',
+    conversationId: 'C1:1',
+  });
+  await plugin.onRunEvent({ type: 'terminal', runId: 'fresh', status: 'completed' });
+
+  expect(slack.updates).toContainEqual(
+    expect.objectContaining({ ts: 'msg-1', text: expect.stringContaining('Approval closed') })
+  );
+});
+
 test('live agent progress posts one node-labelled excerpt', async () => {
   await started();
   await plugin.onRunEvent({

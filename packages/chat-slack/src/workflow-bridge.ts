@@ -77,33 +77,44 @@ export class SlackWorkflowBridge {
     return this.enqueue(() => this.renderEvent(event));
   }
 
-  private async renderEvent(event: ChatRunEvent): Promise<void> {
-    switch (event.type) {
-      case 'workflow_started': {
-        // A gate can arrive before this event when a plugin attaches to a run
-        // already in flight; that path seeds state from the approval event. Do
-        // not post a second status card for a run this bridge already knows.
-        const existing = this.runs.get(event.runId);
-        if (existing?.statusMessageTs) {
-          existing.workflowName = event.workflowName;
-          existing.status = 'running';
-          await this.updateStatusMessage(existing);
-          return;
-        }
-        // A state seeded by a gate has no status message yet; a failed first
-        // post leaves no usable state. Replace it and try a fresh post.
-        if (existing) this.runs.delete(event.runId);
-        const state = this.createRunState({
-          runId: event.runId,
-          workflowName: event.workflowName,
-          conversationId: event.conversationId,
-          status: 'running',
-        });
-        const trigger = this.adapter.getTriggeringMessage(event.conversationId);
-        if (trigger) await this.addReactionSafe(trigger, REACTION_RUNNING);
-        await this.postStatusMessage(state, false);
+  private async onWorkflowStarted(
+    event: Extract<ChatRunEvent, { type: 'workflow_started' }>
+  ): Promise<void> {
+    // A gate can arrive before this event when a plugin attaches to a run
+    // already in flight; that path seeds state from the approval event. Do not
+    // post a second status card for a run this bridge already knows, and keep
+    // its nodes and open approvals when only the status post failed.
+    const existing = this.runs.get(event.runId);
+    if (existing) {
+      existing.workflowName = event.workflowName;
+      existing.status = 'running';
+      if (existing.statusMessageTs) {
+        await this.updateStatusMessage(existing);
         return;
       }
+      await this.postStatusForStarted(existing, event.conversationId);
+      return;
+    }
+    const state = this.createRunState({
+      runId: event.runId,
+      workflowName: event.workflowName,
+      conversationId: event.conversationId,
+      status: 'running',
+    });
+    await this.postStatusForStarted(state, event.conversationId);
+  }
+
+  private async postStatusForStarted(state: RunState, conversationId: string): Promise<void> {
+    const trigger = this.adapter.getTriggeringMessage(conversationId);
+    if (trigger) await this.addReactionSafe(trigger, REACTION_RUNNING);
+    await this.postStatusMessage(state, false);
+  }
+
+  private async renderEvent(event: ChatRunEvent): Promise<void> {
+    switch (event.type) {
+      case 'workflow_started':
+        await this.onWorkflowStarted(event);
+        return;
       case 'node_state':
         if (event.progress !== undefined) {
           await this.onProgress(event);

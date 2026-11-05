@@ -114,7 +114,10 @@ export class ProgressRelay {
       this.cancel(buffer.timer);
       buffer.timer = undefined;
     }
-    const text = buffer.lines.join('\n').trim();
+    // Redact again after joining: a credential split across provider chunks
+    // never matches the per-chunk pass, and the newline separator makes the
+    // combined text unmatchable if it is only scanned before the join.
+    const text = redactProgress(buffer.lines.join('\n')).trim();
     buffer.lines = [];
     buffer.chars = 0;
     if (text === '') return;

@@ -206,6 +206,32 @@ test('abandon releases a failed run; another member is forbidden', async () => {
   expect((await getWorkflowRun(started.id))?.status).toBe('cancelled');
 });
 
+test('abandon refuses an unknown run without changing anything', async () => {
+  expect(
+    await action({
+      runId: 'does-not-exist',
+      action: 'abandon',
+      sender: { platformUserId: 'starter' },
+    })
+  ).toMatchObject({ status: 'refused' });
+});
+
+test('abandon refuses a run whose live owner cannot be stopped', async () => {
+  const started = await run();
+  const owner = await startRunLiveOwner(started.id);
+  try {
+    expect(
+      await action({ runId: started.id, action: 'abandon', sender: { platformUserId: 'starter' } })
+    ).toMatchObject({
+      status: 'refused',
+      message: expect.stringContaining('cannot be stopped from here'),
+    });
+    expect((await getWorkflowRun(started.id))?.status).toBe('running');
+  } finally {
+    await owner.close();
+  }
+});
+
 test('admins can abandon a run they did not start', async () => {
   const started = await run();
   await getDatabase().query(

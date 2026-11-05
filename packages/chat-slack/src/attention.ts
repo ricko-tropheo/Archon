@@ -185,11 +185,7 @@ export class SlackAttentionNotices {
         case 'done': {
           if (!origin.notice) return;
           const note = resolutionNote(response.result);
-          await this.settle(
-            origin.notice,
-            action.runId,
-            `${settledVerb(action)} by <@${origin.user}>${note ? ` (${note})` : ''}`
-          );
+          await this.settle(origin.notice, action.runId, settledVerb(action), origin.user, note);
           return;
         }
       }
@@ -202,11 +198,23 @@ export class SlackAttentionNotices {
     }
   }
 
-  private async settle(ref: SlackMessageRef, runId: string, outcome: string): Promise<void> {
+  private async settle(
+    ref: SlackMessageRef,
+    runId: string,
+    outcome: string,
+    actorUserId?: string,
+    note?: string
+  ): Promise<void> {
     const key = `${ref.channel}:${ref.ts}`;
     const notice = this.open.get(key);
     this.open.delete(key);
-    const { blocks, fallbackText } = buildSettledNoticeBlocks(notice, runId, outcome);
+    const { blocks, fallbackText } = buildSettledNoticeBlocks(
+      notice,
+      runId,
+      outcome,
+      actorUserId,
+      note
+    );
     try {
       await this.adapter
         .getApp()

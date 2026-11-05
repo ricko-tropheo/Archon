@@ -59,6 +59,17 @@ describe('progress relay', () => {
     ).toBe('using [redacted] and [redacted] with [redacted] and [redacted]');
   });
 
+  test('redacts a credential split across provider chunks', () => {
+    const { relay, flushes, tick } = harness();
+    relay.record('run', 'node', 'Node', '-----BEGIN RSA PRIVATE KEY-----');
+    relay.record('run', 'node', 'Node', 'MIIEowIBAAKCAQEA-----END RSA PRIVATE KEY-----');
+    tick();
+    const text = flushes[0]?.text ?? '';
+    expect(text).toContain('[redacted]');
+    expect(text).not.toContain('BEGIN RSA PRIVATE KEY');
+    expect(text).not.toContain('MIIEowIBAAKCAQEA');
+  });
+
   test('caps lines and characters per message', () => {
     const { relay, flushes, tick } = harness();
     for (let index = 0; index < 10; index++) {
